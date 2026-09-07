@@ -126,7 +126,7 @@ def check_e800_includes_col0() -> None:
     ):
         fail("97e3 row width is 24 playfield cols")
     pre = fn_span(m, "static void scroll_precompute(u16 map_row)")
-    peek = fn_span(m, "static void peek_next_row_at(u16 map_row, u16 wrap_px)")
+    peek = fn_span(m, "static void peek_assemble_row(u16 map_row)")
     if not pre or "s_rowbuf[ASM_SKIP + x]" not in pre:
         fail("97e3 must copy e800 from EA48 (ASM_SKIP)")
     if "for (x = 0; x < PF_COLS; x++)" not in pre:
@@ -158,6 +158,8 @@ def check_keep_97e3_commit_peek() -> None:
     commit = fn_span(m, "void map_script_commit_wrap(void)")
     if not commit or "dma_nt_row(s_wrap_nt, s_e800[s_e714]" not in commit:
         fail("KEEP #97: commit DMA e800[e714] at wrap(pre)")
+    if "s_peek_line" not in commit:
+        fail("commit_wrap must also flush the deferred peek row")
     if not re.search(
         r"entity_update\s*\(\s*\)\s*;[\s\S]{0,80}?map_script_commit_wrap\s*\(\s*\)\s*;",
         g,

@@ -44,12 +44,12 @@ def main() -> int:
     ent = ENT.read_text(encoding="utf-8")
 
     peek = re.search(
-        r"static void peek_next_row_at\(u16 map_row, u16 wrap_px\)\s*\{(.*?)^\}",
+        r"static void peek_assemble_row\(u16 map_row\)\s*\{(.*?)^\}",
         map_c,
         re.S | re.M,
     )
     if not peek:
-        return fail("peek_next_row_at not found")
+        return fail("peek_assemble_row not found")
     body = peek.group(1)
     if "s_assemble_peek = 1" not in body:
         return fail("peek must set s_assemble_peek around assemble_row")

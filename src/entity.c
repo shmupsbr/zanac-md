@@ -412,6 +412,8 @@ typedef struct {
     Sprite *mspr;   /* type39 complement SAT (71f6); NULL if occupancy-only */
     u8  marker;     /* type39 sibling count (71da); 0x27 occupancy */
     u8  mframe;     /* FRAME_* for mspr; 0 if occupancy-only / none */
+    u8  cram_nib;   /* PAL2 index after XOR/72de bind; 0 = remap path */
+    u8  cram_col;   /* logical SAT colour while tiles stay on cram_nib */
 } Slot;
 
 static Slot s_shot[SHOT_SLOTS];
@@ -594,6 +596,10 @@ static void fire4_expire_hit(Slot *f);
 static void fire7_cram_restore(void);
 static void fire7_bind_cram(Slot *f);
 static void fire7_cycle_cram(Slot *f);
+static void xor_cram_reset_all(void);
+static void xor_cram_release(Slot *s);
+static int  xor_cram_bind(Slot *s, u8 col);
+static void xor_cram_cycle(Slot *s, u8 col);
 static s16 sat_depth_primary(const Slot *s);
 static s16 sat_depth_marker(const Slot *s);
 
@@ -1267,14 +1273,15 @@ static const u8 *orb_cache_get(u8 sat, const u8 *jp, u8 want)
     return (const u8 *)s_orb_cache[i];
 }
 
-/* Type 72 only: 4-tile Japan disc. Cache key is SAT name + nibble
- * (FRAME_CIRCLE vehicle stays; 8a16 SAT 1C/20/24 changes the pat). */
+/* Type 72 and 84d1/86F3 discs: 4-tile Japan pat. Cache key is SAT
+ * name + nibble (FRAME_CIRCLE vehicle; 8a16 / 84d1 SAT 1C/20/24). */
 static int orb_upload_japan(Slot *s, u8 want)
 {
     const u8 *jp;
     u16 vaddr;
 
-    if (s->kind != KIND_ORB)
+    if (s->kind != KIND_ORB && s->kind != KIND_EXPL
+        && s->kind != KIND_PDEAD && s->kind != KIND_HUSK)
         return 0;
     jp = orb_japan_pat(s->sat);
     if (!jp || !s->spr)
@@ -1313,7 +1320,9 @@ static void spr_upload_color(Slot *s)
      * keeps +04 colour. FRAME_LOGA_C is unfolded as black (marker art),
      * but Japan draws those bits in sat_col. Other 71f6 pairs stay
      * primary+black at the same draw (Y-0x11 / same X). */
-    if (s->kind == KIND_GUN && s->frame == FRAME_LOGA_C && s->sat_col)
+    if (s->cram_nib)
+        want = s->cram_nib;
+    else if (s->kind == KIND_GUN && s->frame == FRAME_LOGA_C && s->sat_col)
         want = (u8)(s->sat_col & 0x0F);
     else if (baked <= 1)
         want = baked;
@@ -1393,6 +1402,15 @@ static void spr_frame_cb(Sprite *sp)
 
 static void spr_set_sat_col(Slot *s, u8 col)
 {
+    /* Japan +04 XOR / 72de is one SAT-colour write. After a CRAM bind
+     * the tiles stay on that nibble; later ticks only write PAL2[n]. */
+    if (s->cram_nib)
+    {
+        xor_cram_cycle(s, col);
+        return;
+    }
+    if (xor_cram_bind(s, col))
+        return;
     s->sat_col = col;
     if (s->spr && s->spr->frame)
         spr_upload_color(s);
@@ -1457,6 +1475,7 @@ static void spr_place(Slot *s, u16 frame)
  * and SPR_update walks leftover SAT entries (slowdown). */
 static void spr_detach(Slot *s)
 {
+    xor_cram_release(s);
     marker_kill(s);
     if (s->spr)
     {
@@ -1593,6 +1612,26 @@ static const u8 k_t60_col[11] = {
     0xC9, 0x86, 0x8F, 0x88, 0x8F, 0x89, 0x8F, 0x88, 0x89, 0x86, 0x8F
 };
 
+/* Leftover flyer SAT at become_expl. 84d1[1] is SAT 0x1C (pat 7).
+ * FRAME_LEAD is that pat cropped to an 8x8 UL shard -- a shared
+ * triangular yellow on every death. Japan 453E keeps +03 until 4912;
+ * the yellow pose is leftover SAT + 84d1 colour, then pats 7/8/9. */
+static int leftover_flyer_sat(u8 sat)
+{
+    u16 fr;
+
+    if (!sat || sat == 0x1C || sat == 0x20 || sat == 0x24 || sat == 0xD0)
+        return 0;
+    fr = frame_from_sat(sat);
+    if (fr >= FRAME_N)
+        return 0;
+    if (fr == FRAME_LEAD || fr == FRAME_MED_CIRCLE || fr == FRAME_CIRCLE)
+        return 0;
+    if (fr == FRAME_SHOT || fr == FRAME_CHIP)
+        return 0;
+    return 1;
+}
+
 /* anim_sub 0x4912: DEC +0D; NZ keep SAT. Else +0D=+0E, write
  * table[+0F], INC +0F, wrap +0F>=+10 to 0.
  * Port: clock=+0D, aux=+0F. Do not increment before the write
@@ -1602,6 +1641,7 @@ static void anim_sub_4912(Slot *e, const u8 *sats, const u8 *cols,
 {
     u16 fr;
     u8 sat;
+    u8 leftover;
 
     if (e->clock)
         e->clock--;
@@ -1611,16 +1651,46 @@ static void anim_sub_4912(Slot *e, const u8 *sats, const u8 *cols,
     if (e->aux < nframes)
     {
         sat = sats[e->aux];
-        e->sat = sat;
-        fr = frame_from_sat(sat);
-        if (fr < FRAME_N)
+        leftover = (u8)e->dest;
+        /* First 84d1 write (table[1] 0x1C / 0x8A): keep leftover SAT
+         * and marker. That is the yellow death flash of THIS flyer.
+         * spawn_expl dest=0 falls through to Japan pats 7/8/9. */
+        if (leftover && leftover_flyer_sat(leftover) && sat == 0x1C
+            && e->aux == 1)
         {
-            spr_place(e, fr);
-            e->sat = sat;
+            e->sat = leftover;
             spr_set_sat_col(e, cols[e->aux]);
         }
-        else if (e->spr)
-            SPR_setVisibility(e->spr, HIDDEN);
+        else
+        {
+            if (leftover && leftover_flyer_sat(leftover))
+                marker_kill(e);
+            e->dest = 0;
+            /* 16x16 vehicle: SGDK BALANCED cuts FRAME_LEAD to 8x8.
+             * Type 72 already encodes pats 7/8/9 into FRAME_CIRCLE.
+             * spr_place writes CIRCLE's SAT 0x24; restore 84d1 name
+             * and re-upload so pat 7/8 is not stuck as pat 9. */
+            if (orb_japan_pat(sat))
+            {
+                spr_place(e, FRAME_CIRCLE);
+                e->sat = sat;
+                e->vram_fr = 0xFF;
+                e->vram_nib = 0xFF;
+                if (e->spr)
+                    spr_upload_color(e);
+            }
+            else
+            {
+                fr = frame_from_sat(sat);
+                if (fr < FRAME_N)
+                    spr_place(e, fr);
+                else if (e->spr)
+                    SPR_setVisibility(e->spr, HIDDEN);
+                e->sat = sat;
+            }
+            if (e->spr)
+                spr_set_sat_col(e, cols[e->aux]);
+        }
     }
     e->aux++;
     if (e->aux >= nframes)
@@ -1633,8 +1703,19 @@ static void become_expl(Slot *e, u8 score_t)
     u8 sat_space = (u8)(e->kind == KIND_GROUND || e->kind == KIND_GUN);
     u8 nt_locked = (u8)(e->kind == KIND_WIDE || e->kind == KIND_FIREBOX
                         || e->kind == KIND_BASE);
+    u8 leftover = e->sat;
 
-    marker_kill(e);
+    /* Japan 453E writes type 0x23 only. +03 leftover SAT and the type39
+     * complement stay until 8446+4912. Do not marker_kill flyers here --
+     * that dropped every death onto a shared FRAME_LEAD triangle.
+     * Hide only NT-locked leftovers (8f25 wide/base/firebox). */
+    if (nt_locked)
+    {
+        marker_kill(e);
+        leftover = 0;
+        if (e->spr)
+            SPR_setVisibility(e->spr, HIDDEN);
+    }
     e->kind = KIND_EXPL;
     e->variant = score_t;
     e->hp = 0;
@@ -1649,10 +1730,12 @@ static void become_expl(Slot *e, u8 score_t)
     e->clock = 0;
     e->vx = 0;
     e->vy = 0;
+    /* dest stashes leftover SAT for 4912's yellow pose. spawn_expl
+     * leaves dest=0 so scatter uses Japan pats 7/8/9 only. */
+    e->dest = leftover;
     /* Flyers keep leftover SAT until 8446+84c9 4912 writes 84d1[1]
      * (item 1 type-35 velocity / SAT). SAT-space leftovers (type 44 /
-     * guns) also keep leftover SAT — Japan 48B8 writes the live SAT Y.
-     * Hide only NT-locked leftovers (8f25 wide/base/firebox). */
+     * guns) also keep leftover SAT — Japan 48B8 writes the live SAT Y. */
 }
 
 /* handler_type60 0x869E: fire_reset + SRL E132/E12E + ev16 + arm 86F3.
@@ -6318,6 +6401,120 @@ static void fire7_cycle_cram(Slot *f)
                  k_tms_vdp[s_fire7_col & 0x0F]);
 }
 
+/* Unused PAL2 body indices (not 2/3 flyer greens, not 13 fire7, not
+ * baked 1/4/7/8/9/10/11/14/15). One live remapper binds once; later
+ * XOR / 72de ticks are CRAM INC like fire 7. */
+#define XOR_CRAM_N      3
+static const u8 k_xor_cram_nib[XOR_CRAM_N] = { 5, 6, 12 };
+static u8 s_xor_cram_used[XOR_CRAM_N];
+
+static void xor_cram_reset_all(void)
+{
+    memset(s_xor_cram_used, 0, sizeof(s_xor_cram_used));
+}
+
+static void xor_cram_release(Slot *s)
+{
+    u8 i;
+
+    if (!s->cram_nib)
+        return;
+    for (i = 0; i < XOR_CRAM_N; i++)
+    {
+        if (k_xor_cram_nib[i] == s->cram_nib && s_xor_cram_used[i])
+        {
+            s_xor_cram_used[i] = 0;
+            PAL_setColor((u16)((PAL2 * 16) + s->cram_nib),
+                         k_tms_vdp[s->cram_nib]);
+            break;
+        }
+    }
+    s->cram_nib = 0;
+    s->cram_col = 0;
+}
+
+static u8 xor_cram_alloc(void)
+{
+    u8 i;
+
+    for (i = 0; i < XOR_CRAM_N; i++)
+    {
+        if (!s_xor_cram_used[i])
+        {
+            s_xor_cram_used[i] = 1;
+            return k_xor_cram_nib[i];
+        }
+    }
+    return 0;
+}
+
+static int xor_cram_wanted(const Slot *s)
+{
+    if (s->kind == KIND_FLASH || s->kind == KIND_SIG
+        || s->kind == KIND_CIRCLE || s->kind == KIND_GSWOOP
+        || s->kind == KIND_TRACKER || s->kind == KIND_PAIRDESC
+        || s->kind == KIND_EXPL || s->kind == KIND_PDEAD
+        || s->kind == KIND_HUSK)
+        return 1;
+    if (s->kind == KIND_EBULLET && s->variant == 21)
+        return 1;
+    return 0;
+}
+
+static void xor_cram_paint(Slot *s, u8 nib)
+{
+    Sprite *sp = s->spr;
+    TileSet *ts;
+    u16 nbytes;
+    u16 vaddr;
+    const u8 *src;
+    const u8 *cached;
+    u8 baked;
+
+    if (!sp || !sp->frame || s->frame >= FRAME_N)
+        return;
+    if (orb_upload_japan(s, nib))
+        return;
+    ts = sp->frame->tileset;
+    if (!ts || !ts->numTile)
+        return;
+    baked = k_frame_color[s->frame];
+    nbytes = (u16)(ts->numTile * 32);
+    vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);
+    src = (const u8 *)FAR_SAFE(ts->tiles, nbytes);
+    cached = remap_cache_get(s->frame, baked, nib, src, nbytes, 0);
+    if (nbytes > REMAP_TILE_BYTES)
+        nbytes = REMAP_TILE_BYTES;
+    DMA_queueDma(DMA_VRAM, (void *)cached, vaddr, (u16)(nbytes / 2), 2);
+    s->vram_fr = s->frame;
+    s->vram_nib = nib;
+}
+
+static int xor_cram_bind(Slot *s, u8 col)
+{
+    u8 nib;
+
+    if (!xor_cram_wanted(s) || !s->spr || !s->spr->frame)
+        return 0;
+    nib = xor_cram_alloc();
+    if (!nib)
+        return 0;
+    s->cram_nib = nib;
+    s->cram_col = col;
+    s->sat_col = col;
+    xor_cram_paint(s, nib);
+    PAL_setColor((u16)((PAL2 * 16) + nib), k_tms_vdp[col & 0x0F]);
+    return 1;
+}
+
+static void xor_cram_cycle(Slot *s, u8 col)
+{
+    s->cram_col = col;
+    s->sat_col = col;
+    PAL_setColor((u16)((PAL2 * 16) + s->cram_nib),
+                 k_tms_vdp[col & 0x0F]);
+}
+
 void entity_init(void)
 {
     memset(s_shot, 0, sizeof(s_shot));
@@ -6328,6 +6525,7 @@ void entity_init(void)
 
     orb_cache_reset();
     remap_cache_reset();
+    xor_cram_reset_all();
     s_rng = 0xA351;
     s_spawn_ctrl = 0x02;          /* stream active */
     s_spawn_base = 0;

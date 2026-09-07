@@ -130,6 +130,11 @@ static u8  s_ram_only;          /* boot: assemble E800 without poking VRAM */
 static u8  s_assemble_peek;     /* peek assemble: tiles only, no place */
 static u8  s_wrap_pending;      /* 97e3 row waiting for post-88ed DMA */
 static u8  s_wrap_nt;           /* hidden_wrap(pre) latched at 97e3 */
+static u8  s_peek_pending;      /* peek DMA deferred to commit_wrap */
+static u8  s_peek_nt;
+static u8  s_peek_line[PF_COLS];
+static u8  s_peek_have;         /* tiles pre-assembled on a quiet leftover */
+static u16 s_peek_maprow;
 /* Two DMA_QUEUE HUD sources -- SGDK stores the pointer until vblank.
  * Playfield is 24-col CPU (Japan 9a79); only the HUD slice is queued.
  * Original pads dst[24-31] so the restore cannot leak leftover charset. */
@@ -145,6 +150,7 @@ static void scroll_speed_reset(u8 target);
 static void fire_pending(void);
 static void scroll_precompute(u16 map_row);
 static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm);
+static void peek_assemble_row(u16 map_row);
 static void peek_next_row_at(u16 map_row, u16 wrap_px);
 static void peek_next_row(u16 map_row);
 static u8 hidden_wrap_nt_at(u16 scroll_px);
@@ -765,10 +771,19 @@ static void scroll_precompute(u16 map_row)
 
 void map_script_commit_wrap(void)
 {
-    if (!s_wrap_pending)
-        return;
-    s_wrap_pending = 0;
-    dma_nt_row(s_wrap_nt, s_e800[s_e714], s_row_tm);
+    /* One post-entity flush: 97e3 wrap (after 87e2/88ed punches) then
+     * the peek sliver. Doing peek DMA during map_script_update on the
+     * carry tick stacked two 24-col CPU bursts before entities. */
+    if (s_wrap_pending)
+    {
+        s_wrap_pending = 0;
+        dma_nt_row(s_wrap_nt, s_e800[s_e714], s_row_tm);
+    }
+    if (s_peek_pending)
+    {
+        s_peek_pending = 0;
+        dma_nt_row(s_peek_nt, s_peek_line, s_row_tm);
+    }
 }
 
 /*
@@ -777,14 +792,11 @@ void map_script_commit_wrap(void)
  * column/stream cursors so col_step is not advanced twice (PR #1).
  * Commands still run only on the real carry (not during the peek).
  */
-static void peek_next_row_at(u16 map_row, u16 wrap_px)
+static void peek_assemble_row(u16 map_row)
 {
     u8 x;
-    u8 line[PF_COLS];
     u8 idol_snap;
 
-    if (s_ram_only)
-        return;
     memcpy(s_col_snap, s_col, sizeof(s_col));
     memcpy(s_stream_snap, s_stream, sizeof(s_stream));
     idol_snap = s_idol_cur;
@@ -796,14 +808,32 @@ static void peek_next_row_at(u16 map_row, u16 wrap_px)
     assemble_row(map_row);
     s_assemble_peek = 0;
     for (x = 0; x < PF_COLS; x++)
-        line[x] = s_rowbuf[ASM_SKIP + x];
-    /* wrap_px selects the playfield-top NT the next 1-8px of VSCROLL
-     * will reveal. In-game wrap_px is scroll_px+8 so peek does not
-     * overwrite this carry's 97e3 row. */
-    dma_nt_row(hidden_wrap_nt_at(wrap_px), line, s_row_tm);
+        s_peek_line[x] = s_rowbuf[ASM_SKIP + x];
     memcpy(s_col, s_col_snap, sizeof(s_col));
     memcpy(s_stream, s_stream_snap, sizeof(s_stream));
     s_idol_cur = idol_snap;
+    s_peek_have = 1;
+    s_peek_maprow = map_row;
+}
+
+static void peek_next_row_at(u16 map_row, u16 wrap_px)
+{
+    if (s_ram_only)
+        return;
+    /* Quiet leftover frames pre-assemble row+2 so the carry tick is
+     * 97e3 + DMA only. Cmd 9 jumps discard a mismatched cache. */
+    if (!(s_peek_have && s_peek_maprow == map_row))
+        peek_assemble_row(map_row);
+    s_peek_have = 0;
+    /* wrap_px selects the playfield-top NT the next 1-8px of VSCROLL
+     * will reveal. In-game wrap_px is scroll_px+8 so peek does not
+     * overwrite this carry's 97e3 row. Boot uses DMA (display off);
+     * gameplay queues until commit_wrap. */
+    s_peek_nt = hidden_wrap_nt_at(wrap_px);
+    if (s_row_tm != DMA_QUEUE)
+        dma_nt_row(s_peek_nt, s_peek_line, s_row_tm);
+    else
+        s_peek_pending = 1;
 }
 
 static void peek_next_row(u16 map_row)
@@ -2592,6 +2622,8 @@ static void scroll_speed_reset(u8 target)
     s_scroll_px = 0;
     s_scroll_delta = 0;
     s_wrap_pending = 0;
+    s_peek_pending = 0;
+    s_peek_have = 0;
     s_row_carry = 0;
     s_scroll_base = 0;
     s_ram_only = 0;
@@ -3139,6 +3171,14 @@ void map_script_update(void)
                 base_approach(1);
             }
         }
+        else if ((s_e711 >> 5) == 4 && !s_peek_have && !s_warp_jingle
+                 && !s_clr_phase && !s_end_phase)
+        {
+            /* Spread peek assemble onto leftover 4 (quiet). Carry
+             * then only 97e3-places + commit_wrap DMA. row+2 is the
+             * peek target after the next INC. */
+            peek_assemble_row((u16)(s_ms.row + 2));
+        }
         lab_9251_tick();
         /* 8f5e is CALL 0x4077 (main loop), not 0x46A8. GO wait is
          * 9480 + 9393 only — 90a6 / hold must not keep ticking.
@@ -3295,6 +3335,14 @@ static void dump4177_advance(void)
 
 static void dump4177_step(u16 n)
 {
+    /* 4177 is the 40DA walk only. A leftover s_dump_left must not
+     * punch 192 cells into a live scroll frame (carry hitch). */
+    if (!s_warp_jingle)
+    {
+        s_dump_left = 0;
+        s_dump_phase = 0;
+        return;
+    }
     while (n-- && s_dump_left)
     {
         u8 col = s_dump_h;
