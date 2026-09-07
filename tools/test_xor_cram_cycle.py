@@ -9,6 +9,9 @@ Bind body pixels to an unused PAL2 nibble (5/6/12 -- not flyer greens
 2/3, not fire7 13) once. Later spr_set_sat_col only writes CRAM.
 Pool miss still hits remap_cache.
 
+Type 67 (SAT ^=0x34 every tick) is not a walker -- shape + colour.
+Type 45 bar/med is not a walker.
+
 KEEP: fire7 PAL2[13]; orb variant cache; 816d gun primary remap.
 
 Usage (from zanac-md):
@@ -68,7 +71,6 @@ def main() -> int:
     for kind in (
         "KIND_FLASH",
         "KIND_SIG",
-        "KIND_CIRCLE",
         "KIND_GSWOOP",
         "KIND_TRACKER",
         "KIND_PAIRDESC",
@@ -76,9 +78,13 @@ def main() -> int:
     ):
         if kind not in wanted:
             return fail("%s must be a CRAM walker" % kind)
+    if "KIND_CIRCLE" in wanted:
+        return fail("type 67 83d8 SAT^=0x34 is not a colour-only walker")
     if "variant == 21" not in wanted:
         return fail("type 21 8659 random colour must CRAM")
-    print("  walkers: 36/56/59/67/gswoop/tracker/21/expl")
+    if "variant == 45" in wanted:
+        return fail("type 45 8625 bar/med must not CRAM")
+    print("  walkers: 36/56/59/gswoop/tracker/21/expl (not 67)")
 
     cyc = fn_span(ent, "static void xor_cram_cycle(Slot *s, u8 col)")
     if not cyc:
