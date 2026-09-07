@@ -80,6 +80,15 @@ def main() -> int:
         return fail("spawn fire 7 must upload comet to the CRAM nibble once")
     if "fire7_cycle_cram(f)" not in ent:
         return fail("update_fire cycle path must CRAM-cycle fire 7")
+    # 72de is shared by fire 0/1/2/7. Only one fire is live; they share
+    # PAL2[13]. Per-frame spr_set_sat_col on 0/1/2 was the leftover hitch.
+    spawn = fn_span(ent, "void entity_try_spawn_fire(s16 x, s16 y, u8 xvel_sel)")
+    if not spawn or spawn.count("fire7_bind_cram") < 1:
+        return fail("72de spawn must bind CRAM for fire 0/1/2/7")
+    if "fn == 0 || fn == 1 || fn == 2 || fn == 7" not in (spawn or ""):
+        return fail("72de CRAM bind must cover fire 0/1/2/7")
+    if "spr_set_sat_col(f, (u8)(0x80 | ((f->sat_col + 1) & 0x0F)))" in ent:
+        return fail("fire 0/1/2 must CRAM-cycle like fire 7, not remap tiles")
     if "s_fire7_col" not in ent:
         return fail("72de colour must be a dedicated INC+AND 0x8F register")
 

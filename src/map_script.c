@@ -80,6 +80,13 @@ static u16 s_warp_jwait;
 static u8  s_warp_old;
 static u8  s_warp_new;
 static u16 s_warp_dest;         /* E722: load after wait_frames(0x64), not before */
+/* 40DA CALL 4177: walk 24x24 E800 onto VRAM (blank before wait, reveal
+ * after 940c). Japan is a blocking VDP walk (~3 frames); we step it. */
+static u8  s_dump_h;
+static u8  s_dump_l;
+static u16 s_dump_left;
+static u8  s_dump_phase;        /* 0 idle, 1 blank, 2 reveal */
+static u8  s_defer_nt_flush;    /* script_boot assembles E800; 4177 reveals */
 static u8  s_nt[32][PF_COLS];   /* VRAM playfield shadow, 24-col */
 static u8  s_e800[BOOT_ROWS][PF_COLS]; /* MSX E800 circular 24x24 */
 static u8  s_e714;              /* E714 circular write index 0-23 */
@@ -111,6 +118,9 @@ static const u8 k_clear_award[19] = {
     0x0F, 0x10, 0x11, 0x11, 0x00, 0x00, 0x00, 0x11,
     0x12, 0x13, 0x14
 };
+/* Intentional MD enhancement: TMS nametable is 8px steps (97e3 on
+ * E711 carry). VSCROLL uses the leftover E711>>5 so the plane slides
+ * 1px/tick at E710=0x20. Do not snap this to 8. Stamps stay tile_wrap. */
 static u16 s_scroll_px;         /* pixel VSCROLL = 8*(row-base) + (E711>>5) */
 static u8  s_scroll_delta;      /* pixels advanced this frame */
 static u8  s_row_carry;         /* E700 bit 1: 97e3 ran this frame */
@@ -1343,7 +1353,9 @@ static void bg_fill_plane(void)
     s_scroll_base = s_ms.row;
     s_ram_only = 0;
     s_row_tm = DMA;
-    flush_boot_playfield();
+    /* 40DA 4177 dumps E800 after 946e. Instant flush is the "jump". */
+    if (!s_defer_nt_flush)
+        flush_boot_playfield();
     fill_letterbox_b();
     /* hidden_wrap is SAT Y 0 (screen 16). At scroll_px=0 that is NT 0
      * (already flushed). +8 is NT 31 -- the row the first 1-8px reveal.
@@ -2575,6 +2587,8 @@ static void scroll_speed_reset(u8 target)
     s_warp_jingle = 0;
     s_warp_jwait = 0;
     s_warp_dest = 0;
+    s_dump_left = 0;
+    s_dump_phase = 0;
     s_scroll_px = 0;
     s_scroll_delta = 0;
     s_wrap_pending = 0;
@@ -3249,51 +3263,59 @@ void map_script_draw_credits(void)
 }
 
 /* 0x40EA: ev11, wait_frames(0x64), then 940c load, then 0x4133 ev10 or 0x4163. */
-static void arm_warp_jingle(u8 old_r, u8 new_r)
+#define DUMP4177_CELLS      0x240   /* 24x24, Japan BC at 417c */
+#define DUMP4177_PER_FRAME  192     /* ~3 frames; Z80+VDP walk budget */
+
+static void dump4177_begin(u8 phase)
 {
-    s_warp_jingle = 1;
-    s_warp_jwait = 0x64;
-    s_warp_old = old_r;
-    s_warp_new = new_r;
+    s_dump_h = 0;
+    s_dump_l = 0;
+    s_dump_left = DUMP4177_CELLS;
+    s_dump_phase = phase;
 }
 
-static void warp_commit_load(void)
+static void dump4177_advance(void)
 {
-    u16 dest = s_warp_dest;
+    /* 41a3 DEC H / JP P / H=0x17 / DEC L, then L -= 5 wrap 24. */
+    if (s_dump_h == 0)
+    {
+        s_dump_h = 0x17;
+        s_dump_l--;
+    }
+    else
+        s_dump_h--;
+    {
+        u8 a = (u8)(s_dump_l - 5);
 
-    s_warp_dest = 0;
-    s_boot_quiet = 1;
-    if (dest == MAP_ENDING_STREAM)
-    {
-        map_script_start_ending();
-        s_boot_quiet = 0;
-        entity_alc_complete();
-        return;
+        if ((s8)a < 0)
+            a = (u8)(a + 0x18);
+        s_dump_l = a;
     }
-    if (blob_ok(dest, 3))
-    {
-        script_boot(resolve_round_from_ptr(dest), dest);
-        s_boot_quiet = 0;
-        entity_alc_complete();
-        return;
-    }
-    map_script_init_round(resolve_round_from_ptr(dest));
-    s_boot_quiet = 0;
-    entity_alc_complete();
 }
 
-static void warp_jingle_tick(void)
+static void dump4177_step(u16 n)
 {
-    if (!s_warp_jingle)
-        return;
-    if (s_warp_jwait)
+    while (n-- && s_dump_left)
     {
-        s_warp_jwait--;
-        return;
+        u8 col = s_dump_h;
+        u8 row = s_dump_l;
+        u8 tid;
+
+        if (col < PF_COLS && row < BOOT_ROWS)
+        {
+            tid = s_e800[(u8)((s_e714 + row) % BOOT_ROWS)][col];
+            /* 4177 CALL 8948 then SETWRT one byte. punch_cell is that
+             * E800-then-VRAM order. Tile 0 is Japan 40FB blank, not
+             * letter 0x20 / sky 0x28. */
+            punch_cell(col, row, tid);
+        }
+        dump4177_advance();
+        s_dump_left--;
     }
-    s_warp_jingle = 0;
-    /* 40DA: wait_frames returned; 940c / 946e now, then 4163 / ev10. */
-    warp_commit_load();
+}
+
+static void warp_play_dest_bgm(void)
+{
     if (player_is_over())
         return;
     /* load_bg_level: new&7==0 and old&7==0 -> stop + ev10, skip 4163. */
@@ -3310,6 +3332,85 @@ static void warp_jingle_tick(void)
         sound_play_event(SND_EV_ROUND8);
     else
         sound_play_event(SND_EV_THEME);
+}
+
+static void arm_warp_jingle(u8 old_r, u8 new_r)
+{
+    s_warp_jingle = 1;
+    s_warp_jwait = 0x64;
+    s_warp_old = old_r;
+    s_warp_new = new_r;
+}
+
+static void warp_commit_load(void)
+{
+    u16 dest = s_warp_dest;
+    u8 keep_jingle = s_warp_jingle;
+
+    s_warp_dest = 0;
+    s_boot_quiet = 1;
+    /* Assemble E800 / 946e; 4177 walks it onto VRAM after this returns.
+     * init_round's scroll_speed_reset must not drop SET-5. */
+    s_defer_nt_flush = 1;
+    if (dest == MAP_ENDING_STREAM)
+    {
+        map_script_start_ending();
+        s_boot_quiet = 0;
+        s_defer_nt_flush = 0;
+        s_warp_jingle = keep_jingle;
+        entity_alc_complete();
+        return;
+    }
+    if (blob_ok(dest, 3))
+    {
+        script_boot(resolve_round_from_ptr(dest), dest);
+        s_boot_quiet = 0;
+        s_defer_nt_flush = 0;
+        s_warp_jingle = keep_jingle;
+        entity_alc_complete();
+        return;
+    }
+    map_script_init_round(resolve_round_from_ptr(dest));
+    s_boot_quiet = 0;
+    s_defer_nt_flush = 0;
+    s_warp_jingle = keep_jingle;
+    entity_alc_complete();
+}
+
+static void warp_jingle_tick(void)
+{
+    if (!s_warp_jingle)
+        return;
+
+    /* 40F8 LDIR E800=0 then 4177 blank, THEN wait_frames(0x64), then
+     * 940c / 946e / 4177 reveal. 9393 stays skipped for the whole
+     * ceremony (KEEP #93). */
+    if (s_dump_left)
+    {
+        dump4177_step(DUMP4177_PER_FRAME);
+        if (s_dump_left)
+            return;
+        if (s_dump_phase == 1)
+        {
+            s_dump_phase = 0;
+            s_warp_jwait = 0x64;
+            return;
+        }
+        /* Reveal finished: 4163 / ev10 after 940c. */
+        s_dump_phase = 0;
+        s_warp_jingle = 0;
+        warp_play_dest_bgm();
+        return;
+    }
+    if (s_warp_jwait)
+    {
+        s_warp_jwait--;
+        return;
+    }
+    /* 40DA: wait_frames returned; 940c / 946e now, then 4177, then 4163. */
+    warp_commit_load();
+    dump4177_begin(2);
+    /* SND_EV_THEME / 4163 runs after this load (warp_play_dest_bgm). */
 }
 
 u8 map_script_warp_waiting(void)
@@ -3344,4 +3445,8 @@ void map_script_warp(u16 dest)
     else
         s_warp_new = resolve_round_from_ptr(dest);
     arm_warp_jingle(old_round, s_warp_new);
+    /* 40FB: LD (E800),0 / LDIR BC=0x23F, then 4177. Wait starts after. */
+    memset(s_e800, 0, sizeof(s_e800));
+    s_warp_jwait = 0;
+    dump4177_begin(1);
 }

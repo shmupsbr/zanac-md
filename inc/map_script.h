@@ -116,7 +116,7 @@ void map_script_punch_88d8(s16 x, s16 y); /* 8874 type 82/89: X-0x28 Y-0x18 */
 void map_script_stamp_82_digit(s16 x, s16 y, u8 fire_num);
 /* Type-72 black orb: dest is a stream pointer. Boots that PC + resolved round. */
 void map_script_warp(u16 dest);
-/* 40DA wait_frames(0x64) / 9480 BIT 5 RET NZ: dest is not loaded yet. */
+/* 40DA 4177 blank + wait_frames(0x64) + load + 4177 reveal. SET 5. */
 u8   map_script_warp_waiting(void);
 
 /* LAB_92af / init_credits_stream: arm stream 0xA6F4 and credits_display.

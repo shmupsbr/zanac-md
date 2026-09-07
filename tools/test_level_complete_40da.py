@@ -189,6 +189,11 @@ def main() -> int:
         fails += 1
     else:
         print("  warp_jingle_tick: commit after 0x64")
+    if "dump4177_begin" not in mapc:
+        fail("40DA 4177 walk (blank/reveal) was omitted")
+        fails += 1
+    else:
+        print("  KEEP: 4177 transition walk")
     if tick and tick.find("warp_commit_load") > tick.find("SND_EV_THEME"):
         fail("4163/ev10 must run after 940c, not before")
         fails += 1

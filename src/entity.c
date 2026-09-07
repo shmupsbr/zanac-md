@@ -5,6 +5,7 @@
 #include "map_script.h"
 #include "resources.h"
 #include "sound.h"
+#include <string.h>
 
 /*
  * Entity slots + spawn ticker.
@@ -321,7 +322,7 @@
 #define FRAME_SART      42  /* pat 62 sart SAT 0xF8 */
 #define FRAME_SART_C    43  /* pat 63 sart_compl SAT 0xFC */
 #define FRAME_LOGA      44  /* pat 18 loga_A SAT 0x48 */
-#define FRAME_LOGA_C    45  /* pat 19 loga_A_compl SAT 0x4C */
+#define FRAME_LOGA_C    45  /* pat 19 SAT 0x4C: Japan 816d uses this as PRIMARY */
 #define FRAME_PLANE     46  /* pat 16 plane SAT 0x40 */
 #define FRAME_PLANE_C   47  /* pat 17 plane_compl SAT 0x44 */
 #define FRAME_BOLT      48  /* pat 13 super_hard_bolt SAT 0x34 */
@@ -1198,6 +1199,53 @@ static void orb_cache_reset(void)
     s_orb_cache_next = 0;
 }
 
+/* (frame, nibble) remap cache for XOR / 72de sprites that still go
+ * through spr_upload_color. Fire 0/1/2/7 prefer CRAM (below); this
+ * catches type 36/56/59/67 and any leftover sat_col walk. 32 slots
+ * of 128 bytes: two nibbles x a handful of frames never evict. */
+#define REMAP_CACHE_N       32
+#define REMAP_TILE_BYTES    128
+
+static u16 s_remap_cache[REMAP_CACHE_N][REMAP_TILE_BYTES / 2];
+static u16 s_remap_key[REMAP_CACHE_N];
+static u8  s_remap_used;
+static u8  s_remap_next;
+
+static void remap_cache_reset(void)
+{
+    s_remap_used = 0;
+    s_remap_next = 0;
+}
+
+static const u8 *remap_cache_get(u8 frame, u8 baked, u8 want,
+                                 const u8 *src, u16 nbytes, u8 paint_all)
+{
+    u16 key = (u16)(((u16)frame << 8) | ((u16)baked << 4) | want);
+    u8 i;
+    u8 *dst;
+
+    for (i = 0; i < s_remap_used; i++)
+        if (s_remap_key[i] == key)
+            return (const u8 *)s_remap_cache[i];
+
+    if (s_remap_used < REMAP_CACHE_N)
+        i = s_remap_used++;
+    else
+    {
+        i = s_remap_next;
+        s_remap_next = (u8)((s_remap_next + 1) & (REMAP_CACHE_N - 1));
+    }
+    dst = (u8 *)s_remap_cache[i];
+    if (nbytes > REMAP_TILE_BYTES)
+        nbytes = REMAP_TILE_BYTES;
+    if (paint_all)
+        orb_paint_body_nibbles(dst, src, nbytes, want);
+    else
+        remap_tiles(dst, src, nbytes, baked, want);
+    s_remap_key[i] = key;
+    return dst;
+}
+
 static const u8 *orb_cache_get(u8 sat, const u8 *jp, u8 want)
 {
     u16 key = (u16)(((u16)sat << 8) | want);
@@ -1252,7 +1300,6 @@ static void spr_upload_color(Slot *s)
     u16 nbytes;
     u16 vaddr;
     const u8 *src;
-    u8 *buf;
 
     if (!sp || !sp->frame || s->frame >= FRAME_N)
         return;
@@ -1261,8 +1308,14 @@ static void spr_upload_color(Slot *s)
         return;
 
     baked = k_frame_color[s->frame];
-    /* Complement-only / blank frames keep verbatim pixels. */
-    if (baked <= 1)
+    /* Complement-only / blank frames keep verbatim pixels.
+     * Exception: 816d writes SAT 0x4C (pat 19) onto the GUN PRIMARY and
+     * keeps +04 colour. FRAME_LOGA_C is unfolded as black (marker art),
+     * but Japan draws those bits in sat_col. Other 71f6 pairs stay
+     * primary+black at the same draw (Y-0x11 / same X). */
+    if (s->kind == KIND_GUN && s->frame == FRAME_LOGA_C && s->sat_col)
+        want = (u8)(s->sat_col & 0x0F);
+    else if (baked <= 1)
         want = baked;
     else if (s->kind == KIND_ORB && (s->sat_col & 0x0F) == 3)
         want = k_orb_mid_pal;   /* 8a16 0x83 off dim PAL2[3] */
@@ -1301,30 +1354,28 @@ static void spr_upload_color(Slot *s)
             return;
         }
 
-        buf = DMA_allocateAndQueueDma(DMA_VRAM, vaddr, (u16)(nbytes / 2), 2);
-        if (!buf)
+        /* Cache the remapped tiles and DMA from the slot. allocateAndQueue
+         * every XOR/72de tick was the leftover 68000 cost after the orb
+         * variant cache; a warm (frame,nibble) slot is a plain queue. */
         {
-            static u8 s_pad[128];
+            const u8 *cached = remap_cache_get(s->frame, baked, want, src,
+                                               nbytes, disc);
+            u16 nq = nbytes;
 
-            if (nbytes > sizeof(s_pad))
-                nbytes = sizeof(s_pad);
+            if (nq > REMAP_TILE_BYTES)
+                nq = REMAP_TILE_BYTES;
             if (disc)
-                orb_paint_body_nibbles(s_pad, src, nbytes, want);
+            {
+                static u8 s_disc[REMAP_TILE_BYTES];
+
+                memcpy(s_disc, cached, nq);
+                orb_keep_body_nibbles(s_disc, nq, want);
+                DMA_queueDma(DMA_VRAM, s_disc, vaddr, (u16)(nq / 2), 2);
+            }
             else
-                remap_tiles(s_pad, src, nbytes, baked, want);
-            if (disc)
-                orb_keep_body_nibbles(s_pad, nbytes, want);
-            DMA_queueDma(DMA_VRAM, s_pad, vaddr, (u16)(nbytes / 2), 2);
-            s->vram_fr = s->frame;
-            s->vram_nib = want;
-            return;
+                DMA_queueDma(DMA_VRAM, (void *)cached, vaddr,
+                             (u16)(nq / 2), 2);
         }
-        if (disc)
-            orb_paint_body_nibbles(buf, src, nbytes, want);
-        else
-            remap_tiles(buf, src, nbytes, baked, want);
-        if (disc)
-            orb_keep_body_nibbles(buf, nbytes, want);
         s->vram_fr = s->frame;
         s->vram_nib = want;
     }
@@ -2815,8 +2866,9 @@ static void gun_fire(Slot *e)
     if (pair > 4)
         pair = 4;
     stype = k_gun[pair][3];
-    /* 816d: +03=0x4c loga_compl while firing (black flash; no body tint).
-     * Marker +03 := 0x54 (pat 21). */
+    /* 816d: +03=0x4C pat 19 on the PRIMARY (keeps +04 colour), marker
+     * +03=0x54 pat 21 colour 0x81. Not a black-on-black flash -- Japan
+     * shows the fire pose as coloured pat 19 over black pat 21. */
     spr_place(e, FRAME_LOGA_C);
     marker_place(e, FRAME_LOGA_D);
     /* 816d -> 8ddb: copy parent Y/X. Japan v1 loga A|B peak is SAT
@@ -5064,10 +5116,11 @@ static void update_fire(void)
     cycle = (u8)(fn == 0 || fn == 1 || fn == 2 || fn == 7);
     if (cycle)
     {
-        if (fn == 7)
-            fire7_cycle_cram(f);
-        else
-            spr_set_sat_col(f, (u8)(0x80 | ((f->sat_col + 1) & 0x0F)));
+        /* Japan 72de is one SAT-colour INC. Fire 7 already cycles CRAM
+         * on PAL2[13]; 0/1/2 are the same INC and only one fire is live,
+         * so they share that index. Per-frame tile remap of 0/1/2 was
+         * the remaining colour-cycle hitch. */
+        fire7_cycle_cram(f);
     }
     if (f->spr)
     {
@@ -6274,6 +6327,7 @@ void entity_init(void)
     mode_backdrop_flash(0);
 
     orb_cache_reset();
+    remap_cache_reset();
     s_rng = 0xA351;
     s_spawn_ctrl = 0x02;          /* stream active */
     s_spawn_base = 0;
@@ -6711,7 +6765,9 @@ void entity_try_spawn_fire(s16 x, s16 y, u8 xvel_sel)
         s_fire.alive = 0;
         return;
     }
-    if (fn == 7)
+    /* 72de weapons share one PAL2[13] CRAM cycle. Bind the live frame
+     * (FIRE / COMET / CIRCLE) once; later ticks only write CRAM. */
+    if (fn == 0 || fn == 1 || fn == 2 || fn == 7)
         fire7_bind_cram(&s_fire);
     /* 7331/73ce SAT 0x10. FRAME_SNOW is pat 4; 4560 uses +03. */
     if (fn == 3 || fn == 6)
