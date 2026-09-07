@@ -160,9 +160,18 @@ static void show_ship(int vis)
         s16 y0 = (s16)mode_y_off();
         s16 y1 = (s16)(y0 + 192);
 
-        /* SAT Y 0xB8 -> draw 200; ship occupies 200-215 over the bar
-         * at 208. Hide only when fully past the 192; high-pri letterbox
-         * tiles clip the overlapping 8px (sprites are low priority). */
+        /* Japan 0x7640 clamps IX+01 to 0xB8 (KEEP). 0x48C0 SUB 0x11
+         * then parks SAT Y at 0xA7 — hull stays in the 192. MD skips
+         * that SAT offset so ship/shots/enemies share stored Y.
+         * Stored 0xB8 draws at 200-215, through the bottom letterbox
+         * at 208. Draw-only: sit the white hull on the bar. Collision
+         * / 7640 stay 0xB8 (no invented 0xB0 stored wall). Complement
+         * stays white Y+2 (7735) after the draw clamp. */
+        if (dy + SHIP_H > y1)
+            dy = (s16)(y1 - SHIP_H);
+        if (dy < y0)
+            dy = y0;
+        cdy = (s16)(dy + 2);
         if (dy + SHIP_H <= y0 || dy >= y1)
             vis = 0;
     }
@@ -172,11 +181,13 @@ static void show_ship(int vis)
     if (vis)
     {
         SPR_setPosition(s_spr, dx, dy);
+        SPR_setPriority(s_spr, FALSE);
         s_spr->status &= (u16)~SPR_FLAG_AUTO_DEPTH;
         SPR_setDepth(s_spr, 0);
         if (s_cspr)
         {
             SPR_setPosition(s_cspr, cx, cdy);
+            SPR_setPriority(s_cspr, FALSE);
             s_cspr->status &= (u16)~SPR_FLAG_AUTO_DEPTH;
             /* 0x772F appends after 4898; later SAT is behind. */
             SPR_setDepth(s_cspr, 1);

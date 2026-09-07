@@ -600,6 +600,7 @@ static void xor_cram_reset_all(void);
 static void xor_cram_release(Slot *s);
 static int  xor_cram_bind(Slot *s, u8 col);
 static void xor_cram_cycle(Slot *s, u8 col);
+static void xor_cram_paint(Slot *s, u8 nib);
 static s16 sat_depth_primary(const Slot *s);
 static s16 sat_depth_marker(const Slot *s);
 
@@ -1462,9 +1463,15 @@ static void spr_place(Slot *s, u16 frame)
             s->vram_nib = 0xFF;
         }
         SPR_setAnimAndFrame(s->spr, 0, frame);
-        /* Tiles before visible. Same frame skips callback -- push now. */
+        /* Tiles before visible. Same frame skips callback -- push now.
+         * CRAM-bound walkers that change SAT name (84d1 discs, gswoop
+         * merge 0xf4) must re-paint the new tiles onto the bound nibble.
+         * xor_cram_cycle alone would keep the old pose and only rotate
+         * CRAM — the broken open/close + fire-0 look. */
         if (prev == (s16)frame)
             spr_upload_color(s);
+        else if (s->cram_nib)
+            xor_cram_paint(s, s->cram_nib);
         spr_sync(s);
     }
 }
@@ -3415,7 +3422,9 @@ static void circle_step(Slot *e)
 {
     /* 0x83d8: SAT name ^=0x34 (0x20 <-> 0x14), color ^=0x0c.
      * SAT 0x14 is gfx pat 5 (small star), extracted into
-     * FRAME_SMALL_STAR. DEC +1b; NZ + bit0 clear -> 48b8 only.
+     * FRAME_SMALL_STAR. Not a CRAM walker: SAT name walks every
+     * tick. remap_cache 15->sat_col (0x86<->0x8A). DEC +1b; NZ + bit0
+     * clear -> 48b8 only.
      * Z: SET +05.0, DEC +1c, +1c==0 SET +05.1; else +04=0x8d,
      * +1b=0x32+(R&0x1e), aim_4c91 + set_velocity_from_dir speed 3.
      * Bit0 gates 8424 JP 4898 (+0c=3). */
@@ -6450,8 +6459,15 @@ static u8 xor_cram_alloc(void)
 
 static int xor_cram_wanted(const Slot *s)
 {
+    /* Colour-only +04 XOR / 84d1 colour walk. Same SAT name (or 84d1
+     * discs that orb_upload_japan already encodes). Do not bind types
+     * whose SAT name walks every tick — CRAM cycle leaves the old
+     * tileset and looks like fire-0 colour rotate + broken frames.
+     * Type 67 83d8 is SAT ^=0x34 (0x20<->0x14) AND colour ^=0x0c:
+     * remap_cache per frame, not this pool. Type 45 8625 bar/med is
+     * KIND_EBULLET variant 45, not 21. */
     if (s->kind == KIND_FLASH || s->kind == KIND_SIG
-        || s->kind == KIND_CIRCLE || s->kind == KIND_GSWOOP
+        || s->kind == KIND_GSWOOP
         || s->kind == KIND_TRACKER || s->kind == KIND_PAIRDESC
         || s->kind == KIND_EXPL || s->kind == KIND_PDEAD
         || s->kind == KIND_HUSK)

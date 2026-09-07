@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Ship SAT Y clamp stays 0x1E..0xB8. Letterbox clips the overlapping 8px.
+"""Ship stored Y clamp stays 0x1E..0xB8 (Japan 0x7640).
 
-player_ship_update 0x7640 CP 0xB8. SAT Y 0xB8 draws at 200; playfield
-ends at 208. Do not invent 0xB0. Restamp letterbox after bg_init.
+MD skips 48C0 SUB 0x11, so stored 0xB8 draws at 200-215 through the
+bottom letterbox (208). Draw-only: sit the hull on the 192 bar. Do
+not invent a stored 0xB0/0xA7 wall. Complement stays white Y+2 (7735).
+Restamp letterbox after bg_init.
 
 Usage (from zanac-md):
     python tools/test_ship_letterbox.py
@@ -32,12 +34,18 @@ def main() -> int:
         return fail("Y clamp must stay 0xB8 (0x7640)")
     if "min_y = 0x1E" not in ply:
         return fail("Y clamp must stay 0x1E (0x7636)")
+    if "max_y = 0xB0" in ply or "max_y = 0xA7" in ply:
+        return fail("do not invent a stored mid-playfield Y wall")
+    if "dy = (s16)(y1 - SHIP_H)" not in ply:
+        return fail("draw must sit the hull on the bottom letterbox (192)")
+    if "cdy = (s16)(dy + 2)" not in ply:
+        return fail("KEEP: complement is drawn white Y+2 (7735) after clamp")
     if "VDP_fillTileMapRect(BG_A, attr, 0, 26, MODE_H32_COLS, 2)" not in mode:
         return fail("bottom letterbox must be full-width high-pri BG_A")
     if "mode_draw_letterbox();" not in map_c:
         return fail("bg_init must restamp letterbox after the plane fill")
 
-    print("ok: ship SAT 0xB8; letterbox restamp after bg_init")
+    print("ok: ship SAT 0xB8; draw stops at letterbox; Y+2 KEEP")
     return 0
 
 

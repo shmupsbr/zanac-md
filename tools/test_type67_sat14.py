@@ -112,6 +112,17 @@ def main() -> int:
     else:
         print("  circle_step: frame_from_sat after SAT XOR")
 
+    wanted = re.search(
+        r"static int xor_cram_wanted\(const Slot \*s\)\s*\{(.*?)^\}",
+        ent,
+        re.S | re.M,
+    )
+    if not wanted or "KIND_CIRCLE" in wanted.group(1):
+        print("FAIL: type 67 must not CRAM-bind (SAT name walks)", file=sys.stderr)
+        fails += 1
+    else:
+        print("  type 67 not in XOR CRAM walker pool")
+
     w14, h14 = hitbox(0x14)
     w20, h20 = hitbox(0x20)
     if (w14, h14) != (10, 10):
