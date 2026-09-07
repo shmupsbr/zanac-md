@@ -104,6 +104,15 @@ def main() -> int:
     if re.search(r"s_scroll_px\s*\+=\s*2|s_e711\s*>>\s*4", map_c):
         return fail("do not invent 2px/frame scroll")
 
+    # Colour-cycle sprites must not remap tiles every tick.
+    ent = (ROOT / "src" / "entity.c").read_text(encoding="utf-8")
+    if "remap_cache_get" not in ent:
+        return fail("XOR / leftover sat_col remaps must hit a (frame,nibble) cache")
+    if "orb_cache_get" not in ent:
+        return fail("KEEP: type-72 orb encoded-variant cache")
+    if "fire7_cycle_cram" not in ent:
+        return fail("KEEP: 72de colour cycle is CRAM")
+
     print("ok: SPR_update; doVBlank; flush; DMA budget raised; no 30fps cap")
     return 0
 
