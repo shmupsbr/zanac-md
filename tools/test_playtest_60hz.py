@@ -112,6 +112,10 @@ def main() -> int:
         return fail("KEEP: type-72 orb encoded-variant cache")
     if "fire7_cycle_cram" not in ent:
         return fail("KEEP: 72de colour cycle is CRAM")
+    if "xor_cram_bind" not in ent or "xor_cram_cycle" not in ent:
+        return fail("XOR leftovers (36/56/59/67/walkers) must CRAM-bind like fire 7")
+    if "k_xor_cram_nib" not in ent:
+        return fail("XOR CRAM must use dedicated PAL2 nibbles, not 2/3/13")
 
     print("ok: SPR_update; doVBlank; flush; DMA budget raised; no 30fps cap")
     return 0

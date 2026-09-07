@@ -49,6 +49,10 @@ def main() -> int:
         return fail("type 80 849c 84d1 must use the disc paint path")
     if "s->kind == KIND_ORB" not in ent:
         return fail("KIND_ORB sanitizer must stay")
+    if "orb_upload_japan" not in ent:
+        return fail("84d1/86F3 SAT 0x1C/0x20/0x24 must encode Japan pats 7/8/9")
+    if "leftover_flyer_sat" not in ent:
+        return fail("become_expl leftover SAT is the yellow pose, not FRAME_LEAD")
     if "static const u8 k_orb_mid_pal = 7" not in ent:
         return fail("k_orb_mid_pal must stay 7")
     if "FRAME_SMALL_STAR" not in ent:

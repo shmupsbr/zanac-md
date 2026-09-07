@@ -38,6 +38,8 @@ def main() -> int:
         return fail("do not force become_expl ground=1 on 4898 type44/guns")
     if "sat_space" not in ent:
         return fail("become_expl must treat KIND_GROUND/GUN as SAT-space")
+    if "e->dest = leftover" not in ent:
+        return fail("become_expl must stash leftover SAT for the yellow pose")
 
     print("ok: 84d1 / 86F3 SAT; leftover vel; ground hide")
     return 0

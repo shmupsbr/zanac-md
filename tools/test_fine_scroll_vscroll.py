@@ -113,6 +113,13 @@ def main() -> int:
         return fail("KEEP: commit_wrap after entity punches")
     if "map_script_commit_wrap" not in game:
         return fail("game_update must still commit_wrap after entities")
+    commit = fn_span(mapc, "void map_script_commit_wrap(void)")
+    if not commit or "s_peek_line" not in commit:
+        return fail("commit_wrap must flush deferred peek (not mid-carry DMA)")
+    if "peek_assemble_row" not in mapc:
+        return fail("peek assemble must be spannable onto leftover 4")
+    if "s_e711 >> 5) == 4" not in mapc and "(s_e711 >> 5) == 4" not in mapc:
+        return fail("pre-assemble peek on leftover 4 (quiet), not on carry")
 
     dma = fn_span(mapc, "static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm)")
     if not dma:
