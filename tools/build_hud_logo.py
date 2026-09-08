@@ -96,11 +96,21 @@ def pack_md4(indices: list[int], w: int, h: int) -> bytes:
     return bytes(out)
 
 
-def c_u8_array(name: str, data: bytes, per: int = 16) -> str:
-    lines = ["const u8 %s[%d] = {" % (name, len(data))]
-    for i in range(0, len(data), per):
-        chunk = data[i:i + per]
-        lines.append("    " + ", ".join("0x%02X" % b for b in chunk) + ",")
+def c_u32_array(name: str, data: bytes, per: int = 4) -> str:
+    """Big-endian longs so VDP_loadTileData matches the u8 nibble stream."""
+    if len(data) % 4:
+        raise ValueError("tile bytes must be a multiple of 4")
+    n = len(data) // 4
+    lines = [
+        "/* u32 so the linker cannot park this on an odd address. VDP_loadTileData",
+        " * does long reads; a u8 blob took Address error (same class as s_orb_cache). */",
+        "const u32 %s[%d] = {" % (name, n),
+    ]
+    for i in range(0, len(data), per * 4):
+        words = []
+        for j in range(i, min(i + per * 4, len(data)), 4):
+            words.append("0x%02X%02X%02X%02X" % (data[j], data[j + 1], data[j + 2], data[j + 3]))
+        lines.append("    " + ", ".join(words) + ",")
     lines.append("};")
     return "\n".join(lines)
 
@@ -172,7 +182,9 @@ def main() -> int:
 #define HUD_LOGO_COL        (MODE_BAR_COL + 1)
 #define HUD_LOGO_VDP        (HUD_TILE_BASE + 256)
 
-extern const u8 hud_logo_tiles[HUD_LOGO_TILES * 32];
+/* u32, not u8: VDP_loadTileData long-reads the source. A u8 blob can
+ * start odd and the 68000 takes Address error (same class as s_orb_cache). */
+extern const u32 hud_logo_tiles[HUD_LOGO_TILES * 8];
 
 #endif
 """,
@@ -182,7 +194,7 @@ extern const u8 hud_logo_tiles[HUD_LOGO_TILES * 32];
     src = ROOT / "src" / "data" / "hud_logo.c"
     src.write_text(
         '#include "hud.h"\n#include "hud_logo.h"\n\n'
-        + c_u8_array("hud_logo_tiles", tiles)
+        + c_u32_array("hud_logo_tiles", tiles)
         + "\n",
         encoding="utf-8",
     )

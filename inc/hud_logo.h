@@ -19,6 +19,8 @@
 #define HUD_LOGO_COL        (MODE_BAR_COL + 1)
 #define HUD_LOGO_VDP        (HUD_TILE_BASE + 256)
 
-extern const u8 hud_logo_tiles[HUD_LOGO_TILES * 32];
+/* u32, not u8: VDP_loadTileData long-reads the source. A u8 blob can
+ * start odd and the 68000 takes Address error (same class as s_orb_cache). */
+extern const u32 hud_logo_tiles[HUD_LOGO_TILES * 8];
 
 #endif

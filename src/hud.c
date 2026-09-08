@@ -223,8 +223,7 @@ static void hud_draw_border(void)
 
 static void hud_load_logo(void)
 {
-    VDP_loadTileData((const u32 *)hud_logo_tiles, HUD_LOGO_VDP,
-                     HUD_LOGO_TILES, CPU);
+    VDP_loadTileData(hud_logo_tiles, HUD_LOGO_VDP, HUD_LOGO_TILES, CPU);
 }
 
 /* Static miniature in the empty interior on / above the closing hbar.
