@@ -1,4 +1,5 @@
 #include "hud.h"
+#include "hud_logo.h"
 #include "mode.h"
 #include "player.h"
 #include "entity.h"
@@ -220,6 +221,33 @@ static void hud_draw_border(void)
     }
 }
 
+static void hud_load_logo(void)
+{
+    VDP_loadTileData((const u32 *)hud_logo_tiles, HUD_LOGO_VDP,
+                     HUD_LOGO_TILES, CPU);
+}
+
+/* Static miniature in the empty interior on / above the closing hbar.
+ * Cols 25-30 keep the 0x4BDF 03 sides; TIME at MSX row 21 stays clear. */
+static void hud_draw_logo(void)
+{
+    u16 y0 = hud_y(HUD_LOGO_MSX_ROW);
+    u16 tid = HUD_LOGO_VDP;
+    u8 ty;
+    u8 tx;
+
+    for (ty = 0; ty < HUD_LOGO_TILE_H; ty++)
+    {
+        for (tx = 0; tx < HUD_LOGO_TILE_W; tx++)
+        {
+            VDP_setTileMapXY(WINDOW,
+                             TILE_ATTR_FULL(PAL3, TRUE, FALSE, FALSE, tid),
+                             (u16)(HUD_LOGO_COL + tx), (u16)(y0 + ty));
+            tid++;
+        }
+    }
+}
+
 static void hud_draw_static_labels(void)
 {
     u16 y;
@@ -240,6 +268,7 @@ static void hud_draw_static_labels(void)
     hud_hbar(6);
     hud_hbar(9);
     hud_hbar(23);
+    hud_draw_logo();
 
     /* Inline strings after CALL 0x5C28 (opcodes ARE the ASCII). */
     hud_str_win(HUD_TEXT, hud_y(4), "TOP");         /* 0x3899 */
@@ -270,6 +299,7 @@ void hud_init(void)
     if (mode_get() != MODE_ORIGINAL)
         return;
     s_hud_ready = 1;
+    hud_load_logo();
     /* Display is still off; wipe WINDOW leftover before bg_init shows. */
     hud_wipe_window();
 }

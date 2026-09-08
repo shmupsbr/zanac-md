@@ -31,7 +31,9 @@ from pathlib import Path
 SCREEN_W = 256
 MAX_W = 240
 MAX_H = 88
-LOGO_Y = 24
+# 16px (two 8×8 rows) below the SCORE/TOP line at nametable row 2.
+# Y=24 sat on the next tile row and cramped the hiscore.
+LOGO_Y = 40
 
 BACKGROUND = 0
 BLUE = 1
