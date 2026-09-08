@@ -340,7 +340,7 @@ static void draw_title_text(void)
     draw_str_pal("PRESENTED     BY PONY INC.", 3, (u16)(TITLE_NT0 + 17), PAL3);
     draw_str_pal("COPYRIGHT @ 1986 PONY INC.", 3, (u16)(TITLE_NT0 + 18), PAL3);
     /* Port credit. Same PAL3 charset and col 3 as the MSX lines above. */
-    draw_str_pal("Conversion by SHMUPSBR", 3, (u16)(TITLE_NT0 + 19), PAL3);
+    draw_str_pal("MD Conversion by SHMUPSBR", 3, (u16)(TITLE_NT0 + 19), PAL3);
     for (i = 0; i < 3; i++)
     {
         put_tile((u16)(14 + i), (u16)(TITLE_NT0 + 20), k_mark0[i], PAL3);
