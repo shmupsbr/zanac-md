@@ -226,8 +226,9 @@ static void hud_load_logo(void)
     VDP_loadTileData(hud_logo_tiles, HUD_LOGO_VDP, HUD_LOGO_TILES, CPU);
 }
 
-/* Static miniature in the empty interior on / above the closing hbar.
- * Cols 25-30 keep the 0x4BDF 03 sides; TIME at MSX row 21 stays clear. */
+/* Static miniature, one MD-band row (8px) above the closing hbar.
+ * Cols 25-30 keep the 0x4BDF 03 sides. TIME (MSX 21) shares the ZANAC
+ * band and restamps this mark when it clears. */
 static void hud_draw_logo(void)
 {
     u16 y0 = hud_y(HUD_LOGO_MSX_ROW);
@@ -341,7 +342,8 @@ void hud_draw_time(u8 on, u8 e155)
     {
         if (s_time_lbl)
         {
-            hud_fill_tile(WINDOW, HUD_TEXT, row, ' ', 6);
+            /* Row 21 is the logo ZANAC band. Restamp; do not space-fill. */
+            hud_draw_logo();
             s_time_lbl = 0;
         }
         return;
