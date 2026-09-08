@@ -86,9 +86,18 @@ def main() -> int:
         return fail("mini logo must be derived from res/title_md_logo.png")
 
     tiles = HUD_LOGO_C.read_text()
+    if "const u32 hud_logo_tiles" not in tiles:
+        return fail("hud_logo_tiles must be u32 (u8 can start odd → Address error)")
+    if "const u8 hud_logo_tiles" in tiles:
+        return fail("do not revert hud_logo_tiles to u8")
     m = re.search(r"hud_logo_tiles\[(\d+)\]", tiles)
-    if not m or int(m.group(1)) != 384:
-        return fail("hud_logo_tiles must be 12*32 = 384 bytes")
+    if not m or int(m.group(1)) != 96:
+        return fail("hud_logo_tiles must be 12*8 = 96 longs (384 bytes, word-aligned)")
+    words = [int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{8})", tiles)]
+    if len(words) != 96:
+        return fail("hud_logo_tiles must list 96 u32 values")
+    if "extern const u32 hud_logo_tiles" not in logo_h:
+        return fail("hud_logo.h must export u32 hud_logo_tiles")
     if not (ROOT / "res" / "hud_zanac_md.png").is_file():
         return fail("res/hud_zanac_md.png missing")
 
