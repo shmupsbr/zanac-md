@@ -52,7 +52,7 @@ def main() -> int:
         return fail("tools/build_title_md.py LOGO_Y must stay 40")
 
     title = TITLE_C.read_text()
-    if 'draw_str_pal("Conversion by SHMUPSBR", 3, (u16)(TITLE_NT0 + 19), PAL3)' not in title:
+    if 'draw_str_pal("MD Conversion by SHMUPSBR", 3, (u16)(TITLE_NT0 + 19), PAL3)' not in title:
         return fail("conversion line must sit under COPYRIGHT at NT0+19, col 3, PAL3")
     for line in (
         'draw_str_pal("GAME DESIGNED BY COMPILE", 3, (u16)(TITLE_NT0 + 15), PAL3)',
@@ -92,7 +92,7 @@ def main() -> int:
     if not (ROOT / "res" / "hud_zanac_md.png").is_file():
         return fail("res/hud_zanac_md.png missing")
 
-    print("ok: title Y=40 / groove 12; Conversion by SHMUPSBR; 6x2 HUD logo")
+    print("ok: title Y=40 / groove 12; MD Conversion by SHMUPSBR; 6x2 HUD logo")
     return 0
 
 
