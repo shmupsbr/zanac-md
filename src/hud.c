@@ -229,9 +229,11 @@ static void hud_load_logo(void)
     VDP_loadTileData(hud_logo_tiles, HUD_LOGO_VDP, HUD_LOGO_TILES, CPU);
 }
 
-/* Static miniature, one MD-band row (8px) above the closing hbar.
- * Cols 25-30 keep the 0x4BDF 03 sides. TIME (MSX 21) shares the ZANAC
- * band and restamps this mark when it clears. */
+/* Static miniature. 4 rows up from #105 (21) would be MSX 17, but
+ * rows 17-18 put the MD band on FIRE. MSX 20 is the highest 6x2 seat
+ * clear of FIRE / SCORE / lives / LEVEL / ROUND. Cols 25-30 keep the
+ * 0x4BDF 03 sides. TIME (MSX 21) still shares the MD band and restamps
+ * this mark when it clears. */
 static void hud_draw_logo(void)
 {
     u16 y0 = hud_y(HUD_LOGO_MSX_ROW);
@@ -345,7 +347,8 @@ void hud_draw_time(u8 on, u8 e155)
     {
         if (s_time_lbl)
         {
-            /* Row 21 is the logo ZANAC band. Restamp; do not space-fill. */
+            /* Row 21 is the logo MD band (HUD_LOGO_MSX_ROW+1). Restamp;
+             * do not space-fill. */
             hud_draw_logo();
             s_time_lbl = 0;
         }

@@ -80,17 +80,24 @@ def main() -> int:
         return fail("TIME must stay MSX row 21")
     time_fn = hud.split("void hud_draw_time(u8 on, u8 e155)", 1)
     if len(time_fn) < 2 or "hud_draw_logo();" not in time_fn[1].split("void hud_draw_player", 1)[0]:
-        return fail("TIME off must restamp the mini logo (row 21 is the ZANAC band)")
+        return fail("TIME off must restamp the mini logo (row 21 is still the MD band)")
     if "hud_fill_tile(WINDOW, HUD_TEXT, row, ' ', 6)" in hud:
         return fail("do not space-fill TIME's row — that would erase the logo")
 
     logo_h = HUD_LOGO_H.read_text()
-    if "HUD_LOGO_MSX_ROW    21" not in logo_h:
-        return fail("mini logo must sit at MSX row 21 (one MD-band / 8px up from 22)")
+    # 21-4=17 overlaps FIRE (MSX 18). Highest clear 6x2 seat is 20.
+    if "HUD_LOGO_MSX_ROW    20" not in logo_h:
+        return fail("mini logo must sit at MSX row 20 (highest clear of FIRE)")
+    if "HUD_LOGO_MSX_ROW    17" in logo_h:
+        return fail("MSX 17 lands the MD band on FIRE row 18")
+    if "HUD_LOGO_MSX_ROW    21" in logo_h:
+        return fail("do not leave the mini logo on MSX row 21")
     if "HUD_LOGO_MSX_ROW    22" in logo_h:
         return fail("do not leave the mini logo on MSX row 22")
-    if "HUD_LOGO_MSX_ROW    21" not in HUD_BUILD.read_text():
-        return fail("build_hud_logo.py must emit HUD_LOGO_MSX_ROW 21")
+    if "HUD_LOGO_MSX_ROW    20" not in HUD_BUILD.read_text():
+        return fail("build_hud_logo.py must emit HUD_LOGO_MSX_ROW 20")
+    if "TITLE_MD_Y" in logo_h:
+        return fail("do not touch title constants from the HUD logo header")
     if "HUD_LOGO_TILE_W     6" not in logo_h or "HUD_LOGO_TILE_H     2" not in logo_h:
         return fail("mini logo must stay 6x2 (HUD interior cols 25-30)")
     if "HUD_TILE_BASE + 256" not in logo_h:
@@ -114,7 +121,7 @@ def main() -> int:
     if not (ROOT / "res" / "hud_zanac_md.png").is_file():
         return fail("res/hud_zanac_md.png missing")
 
-    print("ok: title Y=40 / groove 12; MD Conversion by SHMUPSBR; 6x2 HUD logo @ MSX 21")
+    print("ok: title Y=40 / groove 12; MD Conversion by SHMUPSBR; 6x2 HUD logo @ MSX 20")
     return 0
 
 
