@@ -371,7 +371,12 @@ static u16 op_len(u8 cmd, const u8 *ops)
  * MD pair for the lowest channel error while keeping the original luminance
  * gap (14.9) gives 2 -> 0x4C2, 12 -> 0x4A2: squared error 660, gap 21.7, the
  * best of the field. Entry 2 keeps the value it already had, so this changes
- * exactly one colour. */
+ * exactly one colour.
+ *
+ * Entry 8 is also written out: Filipe's red-pink ground (tiles 0x17/0x18
+ * 6/8 stipple) sat on RGB24_TO_VDPCOLOR(0xFC5554) = 0x066E and swallowed
+ * BONUS digits (PAL3[9]) plus pink flyers (PAL2[8/9]). TMS_DARK_RED_PINK
+ * is that slot ~20% darker; enemy/BONUS CRAM is not this index. */
 static const u16 s_tms_pal[16] = {
     RGB24_TO_VDPCOLOR(0x000000),
     RGB24_TO_VDPCOLOR(0x000000),
@@ -381,7 +386,7 @@ static const u16 s_tms_pal[16] = {
     RGB24_TO_VDPCOLOR(0x7D76FC),
     RGB24_TO_VDPCOLOR(0xD4524D),
     RGB24_TO_VDPCOLOR(0x42EBF5),
-    RGB24_TO_VDPCOLOR(0xFC5554),
+    TMS_DARK_RED_PINK,
     RGB24_TO_VDPCOLOR(0xFF7978),
     RGB24_TO_VDPCOLOR(0xD4C154),
     RGB24_TO_VDPCOLOR(0xE6CE80),
