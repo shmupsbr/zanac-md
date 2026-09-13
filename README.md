@@ -48,10 +48,11 @@ Output: `out/rom.bin`.
 | Title  | START | Start game in that mode (round 1) |
 | Title  | C + START | Continue from last round reached |
 | Game   | D-Pad | Fly the ship (8-dir) |
-| Game   | A (or C) | SPACE: shot (20-frame period) + fire-weapon type 3 |
+| Game   | A | Primary shot (20-frame period) + secondary fire-weapon (type 3). Spends fire ammo. |
+| Game   | B | Primary shot only. Does **not** spawn type 3 or spend fire ammo. |
+| Game   | C | Secondary fire-weapon only (the depleting special). Spends fire ammo. Fire 2 Field stays auto. |
 | Game   | START | Pause toggle (MSX STOP). Mutes via E200; PAUSE at nametable 0x396A |
-| Game   | B | Back to title |
-| Game over | A / C / START | Skip wait, return to title |
+| Game over | A / B / C / START | Skip wait, return to title |
 
 On start the map-script interpreter runs the **real round-1** stream
 (`0xA751`, 57 commands). Cmd 8 at row 30 draws `ROUND 1` from E701. Cmd 9
@@ -62,7 +63,7 @@ pointers. Cmd 5 / cmd B inner streams run `place_tile_group` (type 70/71/82
 idols and fire-boxes) and stamp their tile-runs onto the scrolling nametable.
 Cmd 1 `place_tiles` stamps type-69 ground entities.
 
-Round 1 is shootable: button A/C auto-fires type-2 shots and spawns the type-3 fire-weapon (default fire 0 All-Range). Airborne enemies
+Round 1 is shootable: A fires type-2 shots and the type-3 fire-weapon (default fire 0 All-Range); B is shots only; C is the fire-weapon only. Airborne enemies
 (duster / teruzo / luster / sig / umber / veybar / swoopers) and proto-box pickups spawn from the
 `spawn_table` type list; map-script cmd 0/C feed spawn_ctrl / pace. Shot vs
 enemy kills (boxes take 5 hits; type-4 drops 3 type-38 bullets; type-6 drops a power chip that raises

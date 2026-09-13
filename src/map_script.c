@@ -2390,8 +2390,9 @@ static void cred_tick(void)
         return;
     }
 
-    /* wait_fire_or_timeout: fire restarts the page timer (holds the page). */
-    if (joy & (BUTTON_A | BUTTON_C))
+    /* wait_fire_or_timeout: fire restarts the page timer (holds the page).
+     * MD A/B/C are all fire buttons. */
+    if (joy & (BUTTON_A | BUTTON_B | BUTTON_C))
         return;
 
     if (s_cred_wait)
