@@ -212,6 +212,7 @@
  *           8385 writes 0x3E and RETs; next dispatch is that init RET.
  *           Port become_riser is the 8385 write (collide after updates);
  *           skip first riser_step so 8728+4898 start the following frame.
+ *           8717 SAT 0 / 871b color 0x87: 16x16 (not leftover 0xF8 / 0x40).
  *           Armed 874a: 4898 +0c=1 unsigned Y>=0xD0 (top wrap).
  *           Port: bind/timer 8.8; clock=+0d.
  *   36      flash   - 8296: Yvel 8.8 0080 (+0c=1), attr XOR 0x0e
@@ -1839,7 +1840,14 @@ static int hit_overlap(s16 x1, s16 y1, u8 sat1, s16 x2, s16 y2, u8 sat2)
  * the live tiles, so the punch is not crooked vs the nametable. */
 static int hit_overlap_slot(s16 x1, s16 y1, u8 sat1, const Slot *e)
 {
-    u8 esat = e->sat ? e->sat : (u8)0x40;
+    u8 esat;
+
+    /* 8717 SAT 0 is a real 16x16 name (type 62). Do not map 0→0x40
+     * (plane 14x12) and do not keep leftover type-61 SAT 0xF8 (12x16). */
+    if (e->kind == KIND_RISER)
+        esat = 0;
+    else
+        esat = e->sat ? e->sat : (u8)0x40;
 
     return hit_overlap(x1, y1, sat1, e->x, e->y, esat);
 }
@@ -3329,6 +3337,10 @@ static void become_riser(Slot *e)
     e->vx = 0;
     e->vy = 0;
     e->alive = 1;
+    /* 8717 SAT 0 / 871b 0x87. Leftover type-61 SAT 0xF8 is 12x16;
+     * hit_overlap_slot 0→0x40 is plane 14x12. Japan 16x16. */
+    e->sat = 0;
+    e->sat_col = 0x87;
     /* 8385 writes 0x3E (bit7 clear) and RETs. Next dispatch is 8709
      * init SET 7 / 8727 RET. Arm skip so the first KIND_RISER visit
      * is that RET, not 8728+4898. */
