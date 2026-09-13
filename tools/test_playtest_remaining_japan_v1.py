@@ -193,8 +193,10 @@ def main() -> int:
         return fail("4: 8833 still allocs child 0xD1 SAT 0x24")
 
     # --- 5 green flyer ---
-    if "mdx = mode_draw_x(s->x, 0x81)" not in ent:
-        return fail("5: flyer complement X is parent / 0x81")
+    if "mdx = dx" not in ent:
+        return fail("5: flyer complement X shares primary draw X (71f6 parent SAT X)")
+    if "mdx = mode_draw_x(s->x, 0x81)" in ent:
+        return fail("5: do not recompute complement X from 0x81")
     if "mdy = dy" not in ent:
         return fail("5: flyer complement Y matches primary (71f6 SUB 0x11)")
     if "Do not add ship X+1" not in ent:

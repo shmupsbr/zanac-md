@@ -147,8 +147,10 @@ def main() -> int:
         return fail("spr_sync not found")
     if "mdy = dy" not in sync:
         return fail("71f6 complement Y matches primary (same SUB 0x11)")
-    if "mode_draw_x(s->x, 0x81)" not in sync:
-        return fail("71f6 complement X is parent / 0x81")
+    if "mdx = dx" not in sync:
+        return fail("71f6 complement X shares primary SAT X")
+    if "mode_draw_x(s->x, 0x81)" in sync:
+        return fail("do not recompute complement X from 0x81")
     if "mode_draw_y(s->y) + 2" in ent:
         return fail("do not apply ship Y+2 to enemy complements")
     if "mode_draw_y(s_y) + 2" not in ply:

@@ -5,9 +5,10 @@ Japan +04 XOR / 72de is one SAT-colour byte. MD tile remap every tick
 (type 36/56/59/67, gswoop/tracker, type 21, 84d1 colour walk) was the
 remaining hitch after fire 0/1/2/7 shared PAL2[13].
 
-Bind body pixels to an unused PAL2 nibble (5/6/12 -- not flyer greens
-2/3, not fire7 13) once. Later spr_set_sat_col only writes CRAM.
-Pool miss still hits remap_cache.
+Bind body pixels to an unused PAL2 nibble (2 -- not type 65/67/61
+sat_col 5/6, not fire7 13). 0x8D (type 67 840a / type 61 table) aliases
+to nibble 12 so fire 0/1/2/7 cannot rainbow those bodies.
+Later spr_set_sat_col only writes CRAM. Pool miss still hits remap_cache.
 
 Type 67 (SAT ^=0x34 every tick) is not a walker -- shape + colour.
 Type 45 bar/med is not a walker.
@@ -53,8 +54,16 @@ def main() -> int:
 
     if "xor_cram_bind" not in ent or "xor_cram_cycle" not in ent:
         return fail("XOR leftovers must CRAM-bind like fire 7")
-    if "5, 6, 12" not in ent and "5,6,12" not in ent:
-        return fail("XOR CRAM nibbles must be 5/6/12 (not 2/3 greens, not 13)")
+    if "k_xor_cram_nib" not in ent:
+        return fail("XOR CRAM pool must exist")
+    if re.search(r"k_xor_cram_nib\[XOR_CRAM_N\] = \{[^}]*\b5\b", ent):
+        return fail("XOR CRAM must not own nibble 5 (type 65 0x85)")
+    if re.search(r"k_xor_cram_nib\[XOR_CRAM_N\] = \{[^}]*\b6\b", ent):
+        return fail("XOR CRAM must not own nibble 6 (type 67 0x86 / type 61 0x86)")
+    if "FIRE7_CRAM_NIB" in ent and "NIB_8D_ALIAS" not in ent:
+        return fail("0x8D enemies must alias off fire7 nibble 13")
+    if "NIB_8D_ALIAS    12" not in ent and "NIB_8D_ALIAS 12" not in ent:
+        return fail("type 67 840a / type 61 0x8D tiles sit on nibble 12")
     if "FIRE7_CRAM_NIB  13" not in ent and "FIRE7_CRAM_NIB 13" not in ent:
         return fail("KEEP: fire 7 CRAM nibble 13")
 
@@ -84,7 +93,9 @@ def main() -> int:
         return fail("type 21 8659 random colour must CRAM")
     if "variant == 45" in wanted:
         return fail("type 45 8625 bar/med must not CRAM")
-    print("  walkers: 36/56/59/gswoop/tracker/21/expl (not 67)")
+    if "KIND_LUSTER" not in wanted or "KIND_STEALTH" not in wanted:
+        return fail("solid dual-SAT flyers must be excluded from CRAM")
+    print("  walkers: 36/56/59/gswoop/tracker/21/expl (not 67/65/18)")
 
     cyc = fn_span(ent, "static void xor_cram_cycle(Slot *s, u8 col)")
     if not cyc:

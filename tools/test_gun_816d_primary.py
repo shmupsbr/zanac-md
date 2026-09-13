@@ -96,8 +96,10 @@ def main() -> int:
     sync = fn_span(ent, "static void spr_sync(Slot *s)")
     if not sync:
         return fail("spr_sync not found")
-    if "mode_draw_x(s->x, 0x81)" not in sync:
-        return fail("71f6 complement X must stay parent X / colour 0x81")
+    if "mdx = dx" not in sync:
+        return fail("71f6 complement X must stay parent SAT X (same EC as primary)")
+    if "mode_draw_x(s->x, 0x81)" in sync:
+        return fail("do not recompute complement X from 0x81 (32px split if +04 loses EC)")
     if "mdy = dy" not in sync:
         return fail("71f6 flyer complement Y must match primary draw Y")
     if "+ 2" in sync:

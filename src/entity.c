@@ -602,6 +602,7 @@ static void xor_cram_release(Slot *s);
 static int  xor_cram_bind(Slot *s, u8 col);
 static void xor_cram_cycle(Slot *s, u8 col);
 static void xor_cram_paint(Slot *s, u8 nib);
+static u8   sat_col_tile_nibble(const Slot *s, u8 want);
 static s16 sat_depth_primary(const Slot *s);
 static s16 sat_depth_marker(const Slot *s);
 
@@ -721,10 +722,13 @@ static void spr_sync(Slot *s)
      * the hardware SAT offset). Later SAT index draws behind on TMS. */
     if (!s->mspr)
         return;
-    /* 71f6 X = parent X, color 0x81 (EC). Same draw X/Y as a 0x8x primary
-     * (SUB 0x11 == 48C0). Do not add ship X+1 or ship Y+2 -- those
-     * mis-seat the green flyer complement. */
-    mdx = mode_draw_x(s->x, 0x81);
+    /* 71f6 writes the parent SAT X (IX+02), then color 0x81 (EC).
+     * Type 18 +04 is 0x8B (also EC), so hardware X is SAT-32 for both.
+     * Recompute from 0x81 only when the primary already has bit7; if
+     * +04 ever loses EC the pair used to split by 32px (colour at SAT,
+     * black at SAT-32). Same stored X, same EC decision. Do not add
+     * ship X+1 or ship Y+2 -- those mis-seat the green flyer complement. */
+    mdx = dx;
     mdy = dy;
     SPR_setPosition(s->mspr, mdx, mdy);
     sat_bind_depth(s->mspr, sat_depth_marker(s));
@@ -821,7 +825,8 @@ static void marker_place(Slot *s, u16 frame)
     /* Occupancy stays even if the hardware complement is withheld. */
     if (!s->spr)
         return;
-    mdx = mode_draw_x(s->x, 0x81);
+    /* Same SAT X / EC as the primary (71f6 parent X). */
+    mdx = mode_draw_x(s->x, s->sat_col);
     mdy = slot_draw_y(s);
         if (!s->mspr)
         {
@@ -1334,6 +1339,7 @@ static void spr_upload_color(Slot *s)
         want = (u8)(s->sat_col & 0x0F);
     else
         want = baked;
+    want = sat_col_tile_nibble(s, want);
 
     /* Type 72: Japan pats 7/8/9 into the 16x16 vehicle. Do not use the
      * SGDK FRAME_LEAD tileset (BALANCED 8x8 UL shard / leftover nibbles). */
@@ -2180,7 +2186,7 @@ static void spawn_luster(Slot *e, u8 type)
         e->dest = right ? 0x0300 : 0xFD00;
         e->aux = right ? 0x00 : 0xFF;   /* +14 X-home tgt */
         e->clock = 0x30;                /* +1d fire */
-        e->sat_col = 0x8B;
+        e->sat_col = 0x8B;           /* 7ccd; TMS EC. 71f6 pair 0x74/0x7C */
     }
     else if (type == 17)
     {
@@ -5313,13 +5319,16 @@ static void luster_step(Slot *e)
         if (!e->clock)
         {
             e->clock = 0x30;
+            e->sat_col = (u8)(e->sat_col | 0x80);
             spr_place(e, FRAME_LUSTER_A);
             marker_place(e, FRAME_LUSTER_A_C);
             spawn_frag(e->x, e->y, 0, 37);
         }
-        /* 7cfc: +1d==8 -> SAT 0x78/0x80 (open telegraph). */
+        /* 7cfc: +1d==8 -> SAT 0x78/0x80 (open telegraph).
+         * 71f6 pair stays on the same SAT X; +04 remains 0x8B (EC). */
         if (e->clock == 8)
         {
+            e->sat_col = (u8)(e->sat_col | 0x80);
             spr_place(e, FRAME_LUSTER);
             marker_place(e, FRAME_LUSTER_C);
         }
@@ -6431,11 +6440,14 @@ static void fire7_cycle_cram(Slot *f)
                  k_tms_vdp[s_fire7_col & 0x0F]);
 }
 
-/* Unused PAL2 body indices (not 2/3 flyer greens, not 13 fire7, not
- * baked 1/4/7/8/9/10/11/14/15). One live remapper binds once; later
- * XOR / 72de ticks are CRAM INC like fire 7. */
-#define XOR_CRAM_N      3
-static const u8 k_xor_cram_nib[XOR_CRAM_N] = { 5, 6, 12 };
+/* XOR CRAM pool must not collide with solid / SAT-XOR enemy remaps.
+ * Old {5,6,12} sat on type 65 0x85, type 67 0x86, type 61 8eaf 0x86
+ * and made those bodies walk the walker's CRAM. Nibble 13 is fire 0/1/2/7.
+ * 2 is not a live sat_col nibble (no 0x82). One walker binds; extras
+ * still hit remap_cache. Type 67 840a / type 61 0x8D use nibble 12. */
+#define XOR_CRAM_N      1
+static const u8 k_xor_cram_nib[XOR_CRAM_N] = { 2 };
+#define NIB_8D_ALIAS    12
 static u8 s_xor_cram_used[XOR_CRAM_N];
 
 static void xor_cram_reset_all(void)
@@ -6478,6 +6490,21 @@ static u8 xor_cram_alloc(void)
     return 0;
 }
 
+/* Non-fire tiles must not sit on PAL2[13]: fire 0/1/2/7 72de owns it.
+ * Type 67 840a and type 61 8eaf[7] are 0x8D (magenta) — alias to 12. */
+static u8 sat_col_tile_nibble(const Slot *s, u8 want)
+{
+    if (s->cram_nib)
+        return s->cram_nib;
+    if (want == FIRE7_CRAM_NIB && s->kind != KIND_FIRE)
+    {
+        PAL_setColor((u16)((PAL2 * 16) + NIB_8D_ALIAS),
+                     k_tms_vdp[13]);
+        return NIB_8D_ALIAS;
+    }
+    return want;
+}
+
 static int xor_cram_wanted(const Slot *s)
 {
     /* Colour-only +04 XOR / 84d1 colour walk. Same SAT name (or 84d1
@@ -6486,7 +6513,13 @@ static int xor_cram_wanted(const Slot *s)
      * tileset and looks like fire-0 colour rotate + broken frames.
      * Type 67 83d8 is SAT ^=0x34 (0x20<->0x14) AND colour ^=0x0c:
      * remap_cache per frame, not this pool. Type 45 8625 bar/med is
-     * KIND_EBULLET variant 45, not 21. */
+     * KIND_EBULLET variant 45, not 21.
+     * Solid dual-SAT flyers (luster 16-18, stealth 34/65/66, sart 61)
+     * keep one TMS nibble. Binding them made PAL2[5/6] walk. */
+    if (s->kind == KIND_LUSTER || s->kind == KIND_STEALTH
+        || s->kind == KIND_DESCEND || s->kind == KIND_UMBER
+        || s->kind == KIND_DUSTER || s->kind == KIND_TERUZO)
+        return 0;
     if (s->kind == KIND_FLASH || s->kind == KIND_SIG
         || s->kind == KIND_GSWOOP
         || s->kind == KIND_TRACKER || s->kind == KIND_PAIRDESC
