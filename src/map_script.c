@@ -73,6 +73,7 @@ static u16 s_e15a;              /* 8f5e hold timer, armed = 0x00C0 */
 static u8  s_e154;              /* BCD hold-timer low (seconds), word with E155 */
 static u8  s_time_on;           /* TIME HUD at 0x3AB9 / 0x3ABD */
 static u8  s_clr_phase;         /* 90a6/91a6 non-blocking sequencer */
+static u8  s_bonus_on;          /* 0x9183 BONUS overlay on BG_A */
 static u16 s_clr_wait;
 static u8  s_clr_mode;          /* E157&0x1F latched at 90a6 */
 static u8  s_boot_quiet;        /* type-72 warp: skip boot/ending default BGM */
@@ -176,6 +177,7 @@ static void recolor_charset_tile_fill(u8 tid, u8 ct);
 static void apply_hud_charset_ct(void);
 #endif
 static void credits_ensure_logo_tiles(void);
+static void bonus_clear(void);
 
 /* credits_control_table 0x4775. Each byte B is a skip-N index into the
  * length-prefixed stream at 0x47AA (LAB_46F5: HL=0x47AA, DJNZ skip).
@@ -2667,6 +2669,7 @@ static void scroll_speed_reset(u8 target)
     s_clr_phase = 0;
     s_clr_wait = 0;
     s_clr_mode = 0;
+    bonus_clear();
     s_warp_jingle = 0;
     s_warp_jwait = 0;
     s_warp_dest = 0;
@@ -2835,6 +2838,9 @@ static void base_clear_finish(void)
 {
     u8 mode = s_clr_mode;
 
+    /* 91d3 9315 clears TIME, not BONUS. Overlay would stick on BG_A
+     * (VSCROLL 0) after the 100+40 frame 9393 wait, so drop it here. */
+    bonus_clear();
     s_clr_phase = 0;
     /* 91ea: SUB 0x0F on E157&0x1F. C -> 4163; Z -> B7A5; DEC Z -> 91FD;
      * DEC Z -> 9251; else 92af. */
@@ -3033,15 +3039,74 @@ static void base_hold(void)
         entity_base_or_flags(8);
 }
 
+/* 0x49B5: 6 digits, leading 0 -> 0x20, then a trailing 0x30. */
+static void format_bonus_score(char *out, u32 n)
+{
+    u8 i;
+    u8 nz = 0;
+
+    if (n > 999999UL)
+        n = 999999UL;
+    for (i = 0; i < 6; i++)
+    {
+        u32 div = 1;
+        u8 k;
+        u8 d;
+
+        for (k = 0; k < (u8)(5 - i); k++)
+            div *= 10;
+        d = (u8)((n / div) % 10);
+        if (d || nz)
+        {
+            out[i] = (char)('0' + d);
+            nz = 1;
+        }
+        else
+            out[i] = ' ';
+    }
+    out[6] = '0';
+    out[7] = 0;
+}
+
+static void bonus_clear(void)
+{
+    if (!s_bonus_on)
+        return;
+    s_bonus_on = 0;
+    /* Tile 0, not 0x20: same as the ROUND banner clear (CT bg=0). */
+    if (mode_get() == MODE_ORIGINAL)
+        hud_fill_tile(BG_A, 6, mode_text_row(11), 0, 12);
+}
+
+static void bonus_draw(u8 award_idx)
+{
+    char score[8];
+
+    /* BIT 6,E157 at 0x9183 / 0x91AF: skip the nametable print. */
+    if (s_e157 & 0x40)
+        return;
+    if (mode_get() != MODE_ORIGINAL)
+        return;
+
+    format_bonus_score(score, player_award_points(award_idx));
+    /* 0x3966 "BONUS" (row 11 col 6); 0x396B is 0x49B5 (col 11). */
+    hud_draw_str(BG_A, 6, mode_text_row(11), "BONUS");
+    hud_draw_str(BG_A, 11, mode_text_row(11), score);
+    s_bonus_on = 1;
+}
+
 void map_script_base_cleared(void)
 {
     u8 idx = (u8)(s_e157 & 0x1F);
+    u8 award = (idx < 19) ? k_clear_award[idx] : 0;
 
     /* 0x91A4: E157&0x1F >= 0x10 -> SET 2,E102 (mute ev8/ev9). */
     if (idx >= 0x10)
         player_e102_set(0x04);
-    if (idx < 19 && k_clear_award[idx])
-        player_add_score(k_clear_award[idx]);
+    if (award)
+        player_add_score(award);
+    /* 0x9183: print before/with 0x91C1 add_score. Bit6 still prints 0 pts. */
+    bonus_draw(award);
     map_script_resume_scroll();
 }
 
