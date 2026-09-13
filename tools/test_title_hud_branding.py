@@ -38,18 +38,20 @@ def consts(path: Path) -> dict:
 
 def main() -> int:
     md = consts(TITLE_MD)
-    if md.get("TITLE_MD_Y") != 40:
-        return fail("TITLE_MD_Y must be 40 (two 8x8 rows below Y=24)")
-    if md.get("TITLE_ZANAC_TILE_Y") != 5:
-        return fail("TITLE_ZANAC_TILE_Y must follow TITLE_MD_Y (40>>3 == 5)")
-    if md.get("TITLE_MDMARK_TILE_Y") != 10:
+    # SCORE/TOP is TITLE_NT0 row 2 (Y=16-23). Y=8 overlaps it; Y=24 is flush.
+    y = 32
+    if md.get("TITLE_MD_Y") != y:
+        return fail("TITLE_MD_Y must be %d (one 8x8 row below Y=24; Y=8 overlaps SCORE)" % y)
+    if md.get("TITLE_ZANAC_TILE_Y") != (y >> 3):
+        return fail("TITLE_ZANAC_TILE_Y must follow TITLE_MD_Y (%d>>3 == %d)" % (y, y >> 3))
+    if md.get("TITLE_MDMARK_TILE_Y") != (y >> 3) + 5:
         return fail("TITLE_MDMARK_TILE_Y must stay mark-relative (+5 tiles)")
-    if md.get("TITLE_GROOVE_ROW") != 12:
-        return fail("TITLE_GROOVE_ROW must move with the wordmark (12)")
+    if md.get("TITLE_GROOVE_ROW") != ((y + 56) >> 3):
+        return fail("TITLE_GROOVE_ROW must move with the wordmark (%d)" % ((y + 56) >> 3))
     if md.get("TITLE_ZANAC_TRAVEL") != 56:
         return fail("do not change swirl travel")
-    if "LOGO_Y = 40" not in BUILD.read_text():
-        return fail("tools/build_title_md.py LOGO_Y must stay 40")
+    if "LOGO_Y = %d" % y not in BUILD.read_text():
+        return fail("tools/build_title_md.py LOGO_Y must stay %d" % y)
 
     title = TITLE_C.read_text()
     if 'draw_str_pal("MD Conversion by SHMUPSBR", 3, (u16)(TITLE_NT0 + 19), PAL3)' not in title:
@@ -114,7 +116,7 @@ def main() -> int:
     if not (ROOT / "res" / "hud_zanac_md.png").is_file():
         return fail("res/hud_zanac_md.png missing")
 
-    print("ok: title Y=40 / groove 12; MD Conversion by SHMUPSBR; 6x2 HUD logo @ MSX 21")
+    print("ok: title Y=32 / groove 11; MD Conversion by SHMUPSBR; 6x2 HUD logo @ MSX 21")
     return 0
 
 

@@ -31,9 +31,12 @@ from pathlib import Path
 SCREEN_W = 256
 MAX_W = 240
 MAX_H = 88
-# 16px (two 8×8 rows) below the SCORE/TOP line at nametable row 2.
-# Y=24 sat on the next tile row and cramped the hiscore.
-LOGO_Y = 40
+# Rest pose of the HIS wordmark. SCORE/TOP is nametable row 2 (pixels 16–23
+# under the 16px letterbox). Y=8 (four 8×8 rows above the post-#102 Y=40)
+# starts on row 1 and paints through the SCORE row. Y=24 is flush under
+# SCORE and was cramped. Y=32 keeps one blank 8×8 row — the highest
+# readable gap. Swirl path deltas are unchanged; only this origin moves.
+LOGO_Y = 32
 
 BACKGROUND = 0
 BLUE = 1
