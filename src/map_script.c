@@ -233,7 +233,6 @@ static u8  s_cred_exit;
 static u8  s_cred_idx;
 static u16 s_cred_wait;
 static u8  s_cred_settle;
-static u16 s_cred_age;
 static u8  s_cred_dirty;
 static u8  s_cred_logo_ok;
 
@@ -1863,10 +1862,15 @@ static void stream_stamp_buf(void)
         }
         else if (len >= 0xFE)
         {
-            /* 0x9A3E: nested load_stream_slots; C = parent ybase. */
+            /* 0x9A3E CP 0xFE / JR NC 9A68: nest via load_stream_slots
+             * (C = parent ybase). 0x9A74 JR NZ 9A44: 0xFF stores the
+             * advanced HL and DEC count. 0xFE (Z) skips 9A44 — parent
+             * ptr/count stay so a nested rebind (R8 0xB950) sticks. */
             u16 body = (u16)(s->ptr + 2);
             u16 blen = stream_slots_body_len(body);
             load_stream_slots_at(body, s->ybase);
+            if (len == 0xFE)
+                continue;
             s->ptr = (u16)(body + blen);
         }
         else
@@ -2333,7 +2337,6 @@ static void cred_enter(void)
     s_cred_idx = 0;
     s_cred_wait = CRED_WAIT_PAGE;
     s_cred_settle = 0;
-    s_cred_age = 0;
     s_cred_dirty = 1;
     s_cred_logo_ok = 0;
     s_ms.credits = 1;
@@ -2367,18 +2370,18 @@ static void cred_tick(void)
     if (!s_cred_on)
         return;
 
-    if (s_cred_age < 0xFFFF)
-        s_cred_age++;
-
-    /* START maps to MSX ESC after the 80-frame settle window. */
-    if ((joy & BUTTON_START) && s_cred_age > CRED_SETTLE)
-        s_cred_exit = 1;
-
+    /* 0x476C check_esc_key is a level SNSMAT sample after wait+0x50
+     * settle, once per page. START=ESC; held during the wait is ignored. */
     if (s_cred_settle)
     {
         s_cred_settle--;
         if (!s_cred_settle)
-            cred_advance();
+        {
+            if (joy & BUTTON_START)
+                s_cred_exit = 1;
+            else
+                cred_advance();
+        }
         return;
     }
 

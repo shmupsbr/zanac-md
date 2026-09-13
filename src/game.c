@@ -249,13 +249,8 @@ void game_update(void)
         return;
     }
 
-    /* pause_handler 0x4DA5: MSX STOP -> START in play.
-     * SELECT resume latch (E118 bit7 / SNSMAT row 7 bit 4) has no MD key. */
-    if (pause_tick(pressed))
-        return;
-
-    /* 40DA wait_frames: no 9393 (entity_dispatch / player_hit). 9480 is
-     * already BIT 5 RET NZ via map_script_warp_waiting. */
+    /* 40DA wait_frames 0x5BEC: vblank spin, no 9393 / 4DA5 / ESC.
+     * 9480 is already BIT 5 RET NZ via map_script_warp_waiting. */
     if (map_script_warp_waiting())
     {
         map_script_update();
@@ -264,6 +259,11 @@ void game_update(void)
         player_draw_hud();
         return;
     }
+
+    /* pause_handler 0x4DA5: MSX STOP -> START in play.
+     * SELECT resume latch (E118 bit7 / SNSMAT row 7 bit 4) has no MD key. */
+    if (pause_tick(pressed))
+        return;
 
     map_script_update();
     player_update();
