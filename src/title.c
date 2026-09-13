@@ -18,8 +18,9 @@
  *   BG_B  - blue title_zanac wordmark, 5 staggered strips on the MSX path
  *           (deltas from path[0] mapped onto TITLE_ZANAC_TILE_X/Y).
  *   BG_A  - opaque groove lip + STATIC title_mdmark in front + SCORE/credits.
- * TITLE_MD_Y is 40 (two 8x8 rows under SCORE at TITLE_NT0) so the mark
- * is not cramped against the hiscore. Swirl deltas are unchanged.
+ * TITLE_MD_Y is 32 (one 8x8 row under SCORE at TITLE_NT0). Y=8 (four
+ * rows above the post-#102 Y=40) overlaps letterbox + SCORE; Y=24 is
+ * flush and cramped. Swirl deltas are unchanged.
  * The MD mark is drawn once at rest and never moves. Color 0 on both planes
  * is transparent, so the blue settles behind the mark.
  *
