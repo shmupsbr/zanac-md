@@ -12,6 +12,14 @@
  * See the derivation above s_tms_pal in src/map_script.c. */
 #define TMS_DARK_GREEN  0x04A2
 
+/* Intentional MD diverge (Filipe): TMS 8 is the bright half of the red-pink
+ * ground (charset 0x17/0x18/0x19 are a 6/8 stipple). RGB24_TO_VDPCOLOR of
+ * TMS 8 (0xFC5554) is CRAM 0x066E — too close to PAL3[9] BONUS digits
+ * (0xFF7978 / 0x088E) and to PAL2 asteroids/flyers that keep SAT 0x88/0x89.
+ * ~20% darker: 0xFC5554 * 0.8 = 0xCA4443 → nearest legal 3-bit (6,2,2) =
+ * 0x044C. PAL3[6]/PAL3[9] and PAL2 are unchanged so enemy/BONUS ink stays. */
+#define TMS_DARK_RED_PINK  0x044C
+
 /*
  * MSX map-script interpreter.
  *
