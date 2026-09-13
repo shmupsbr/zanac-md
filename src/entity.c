@@ -1469,16 +1469,21 @@ static void spr_place(Slot *s, u16 frame)
             s->vram_fr = 0xFF;
             s->vram_nib = 0xFF;
         }
+        /* Type 18 7cfc SAT 0x74 (FRAME_LUSTER_A, baked 11) -> 0x78
+         * (FRAME_LUSTER, baked 14) must remap 14->+04 nibble 11 or the
+         * open pose stays gray / stale closed+open-black. Same-frame
+         * skips the SGDK callback -- push now. CRAM-bound SAT-name
+         * walkers still xor_cram_paint (84d1 / gswoop 0xf4). */
+        if (prev != (s16)frame)
+        {
+            s->vram_fr = 0xFF;
+            s->vram_nib = 0xFF;
+        }
         SPR_setAnimAndFrame(s->spr, 0, frame);
-        /* Tiles before visible. Same frame skips callback -- push now.
-         * CRAM-bound walkers that change SAT name (84d1 discs, gswoop
-         * merge 0xf4) must re-paint the new tiles onto the bound nibble.
-         * xor_cram_cycle alone would keep the old pose and only rotate
-         * CRAM — the broken open/close + fire-0 look. */
-        if (prev == (s16)frame)
-            spr_upload_color(s);
-        else if (s->cram_nib)
+        if (s->cram_nib && prev != (s16)frame)
             xor_cram_paint(s, s->cram_nib);
+        else
+            spr_upload_color(s);
         spr_sync(s);
     }
 }
@@ -5314,7 +5319,10 @@ static void luster_step(Slot *e)
 
     if (e->variant == 18)
     {
-        /* 7ce1: DEC +0x1d; on 0 reload 0x30, SAT 0x74/0x7C, 8ddb type37. */
+        /* 7ce1 DEC +0x1d. On 0 (7cea): reload 0x30, SAT 0x74/0x7C
+         * (pats 29/31 closed), then 7cf7 8ddb type37. 7cfc CP 8 after
+         * that write: 0x30!=8 so fire frame stays closed. Open is only
+         * 7d04 SAT 0x78/0x80 (pats 30/32) while +1d is 8..1. */
         e->clock--;
         if (!e->clock)
         {
@@ -5325,7 +5333,8 @@ static void luster_step(Slot *e)
             spawn_frag(e->x, e->y, 0, 37);
         }
         /* 7cfc: +1d==8 -> SAT 0x78/0x80 (open telegraph).
-         * 71f6 pair stays on the same SAT X; +04 remains 0x8B (EC). */
+         * 71f6 pair stays on the same SAT X; +04 remains 0x8B (EC).
+         * spr_place remaps FRAME_LUSTER baked 14 -> nibble 11. */
         if (e->clock == 8)
         {
             e->sat_col = (u8)(e->sat_col | 0x80);
