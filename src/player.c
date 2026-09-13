@@ -626,6 +626,13 @@ void player_save_hiscore(void)
         s_hiscore = s_score;
 }
 
+u32 player_award_points(u8 idx)
+{
+    if (idx > 20)
+        idx = 20;
+    return k_award[idx];
+}
+
 void player_add_score(u8 award_idx)
 {
     if (award_idx > 20)

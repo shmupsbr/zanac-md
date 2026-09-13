@@ -54,6 +54,8 @@ u8   player_fire_ammo(void);
 u8   player_fire_life_tick(void);
 void player_skip_over(void);
 void player_add_score(u8 award_idx);
+/* score_award_table 0x4AEA decoded. 0x49B5 prints this then a trailing 0. */
+u32  player_award_points(u8 idx);
 /* E106-E108 top score. Persists across title_screen_init. */
 u32  player_hiscore(void);
 u32  player_score(void);
