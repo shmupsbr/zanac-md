@@ -6318,8 +6318,17 @@ static void collide_player(void)
         }
         else if (cls == CLS_EXPL)
         {
-            /* 453E -> 0x23; type35 first frame ALC+ev17+4a6a(+0x18). */
-            become_expl(e, slot_msx_type(e));
+            /* 453E -> 0x23; type35 first frame ALC+ev17+4a6a(+0x18).
+             * Type 61: 8368 CALL 44BA (ship then shots). Same visit still
+             * 836B CP 0x23 / 8371 BFB3 / 8374 score / 838A E148>=5. */
+            if (e->kind == KIND_DESCEND)
+            {
+                if (descender_on_death(e))
+                    return;
+                become_expl(e, 61);
+            }
+            else
+                become_expl(e, slot_msx_type(e));
         }
         else
             spr_kill(e);  /* CLS_CLEAR bullets (20/37/38/41/42/43) */
@@ -6650,10 +6659,19 @@ void entity_alc_reset(void)
     alc_recompute();
 }
 
+void entity_alc_zero_e132(void)
+{
+    /* reset_entities 0x40D6: SUB A / LD (E132),A. Not E12E/E12F/E131.
+     * Dest-0 40E2 jumps 414d after this, so E132 lands on 0x20. */
+    s_e132 = 0;
+}
+
 void entity_alc_complete(void)
 {
     /* LAB_414d 0x4152: LD HL,E132 / ADD A,0x20 / JR NC / LD (HL),0xFF.
-     * reset_entities 0x40D6 already zeroed E132, so live result is 0x20. */
+     * 40DA always 40D6-zeros E132 first (dest 0 via entity_alc_zero_e132;
+     * non-zero dest via script_boot alc_reset). Live result is 0x20 unless
+     * a later 414d runs without that zero. */
     u16 v = (u16)s_e132 + 0x20;
 
     s_e132 = (v > 255) ? 0xFF : (u8)v;
