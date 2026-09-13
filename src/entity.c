@@ -726,8 +726,8 @@ static void spr_sync(Slot *s)
      * Type 18 +04 is 0x8B (also EC), so hardware X is SAT-32 for both.
      * Recompute from 0x81 only when the primary already has bit7; if
      * +04 ever loses EC the pair used to split by 32px (colour at SAT,
-     * black at SAT-32). Same stored X, same EC decision. Do not add
-     * ship X+1 or ship Y+2 -- those mis-seat the green flyer complement. */
+     * black at SAT-32). Same stored X, same EC decision.
+     * Do not add ship X+1 or ship Y+2 -- those mis-seat the green flyer. */
     mdx = dx;
     mdy = dy;
     SPR_setPosition(s->mspr, mdx, mdy);
