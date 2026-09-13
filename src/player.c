@@ -234,8 +234,7 @@ static void respawn(void)
     s_invuln = PLAYER_IFRAMES;
     s_if_latch = 1;         /* 0x75fb SET 7,(IX+0x05) */
     s_shot_level = 0;       /* player_ship_handler 0x7603 zeroes E10B on spawn */
-    s_shot_cd = 0;
-    s_alc_cadence = 0;
+    /* 75D5 does not store E13F or E110 — they freeze while type 60. */
     entity_zero_e130();     /* 0x7606 SUB A / LD (E130),A (HUD tail omitted) */
     s_xvel_sel = 4;
     entity_kill_fire();

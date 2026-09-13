@@ -3608,9 +3608,11 @@ void map_script_warp(u16 dest)
     /* 40BA: clear live slots + E150=0. Do not write type 0x28 (totem punch). */
     entity_clear_enemies();
 
-    /* level_complete_handler: E722==0 skips stop/ev11 and the load. */
+    /* level_complete_handler: E722==0 skips stop/ev11 and the load.
+     * 40DA already CALL 40BA (E132=0) then 40E2 JP 414d (E132 += 0x20). */
     if (!dest)
     {
+        entity_alc_zero_e132();
         entity_alc_complete();
         return;
     }

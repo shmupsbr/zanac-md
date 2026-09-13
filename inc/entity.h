@@ -19,6 +19,8 @@ void entity_on_spawn_pace(s8 nudge);
  * Cmd 9 (0x96E2 JP 0x9433) does not wipe them.
  * Do not bake LAB_414d's E132+=0x20 in here — first boot never enters 40DA. */
 void entity_alc_reset(void);
+/* reset_entities 0x40D6: zero E132 only. Dest-0 40E2 uses this before 414d. */
+void entity_alc_zero_e132(void);
 /* LAB_414d after reset_entities: E132 += 0x20, sat 0xFF.
  * Warp / award 0x0F / LAB_92af SET 5, not title script_boot. */
 void entity_alc_complete(void);
