@@ -6,6 +6,7 @@
 #include "resources.h"
 #include "sound.h"
 #include "hud.h"
+#include "title_logo.h"
 #include <string.h>
 
 /*
@@ -174,12 +175,19 @@ static void recolor_charset_tile_fill(u8 tid, u8 ct);
 #if MAP_HAS_CHARSET
 static void apply_hud_charset_ct(void);
 #endif
+static void credits_ensure_logo_tiles(void);
 
-/* credits_control_table 0x4775 + length-prefixed strings 0x47AA (ASCII only). */
+/* credits_control_table 0x4775. Each byte B is a skip-N index into the
+ * length-prefixed stream at 0x47AA (LAB_46F5: HL=0x47AA, DJNZ skip).
+ * First record at 0x47AA is length 0 (blank row). IDs 0x12-0x16 are the
+ * 18-byte logo nametable rows at 0x4826; ID 0x17 is 18 spaces. */
 #define CRED_ROW0       5
 #define CRED_WAIT_PAGE  0x190
 #define CRED_WAIT_LAST  0x4B0
 #define CRED_SETTLE     0x50
+#define CRED_LOGO0      18
+#define CRED_LOGO4      22
+#define CRED_LOGO_W     18
 
 static const u8 k_cred_ctrl[] = {
     0x01, 0x00, 0x06, 0x0A, 0x07, 0xFF,
@@ -194,13 +202,29 @@ static const u8 k_cred_ctrl[] = {
     0xFF
 };
 
+/* Index = skip-N from 0x47AA. [0] is the length-0 blank. */
 static const char *const k_cred_str[] = {
+    "",
     "GAME DESIGN", "PROGRAM", "GRAPHICS", "SOUND", "DIRECTOR",
     "JANUS", "JEMINI", "COMPILE", "WAO", "MOO",
     "MIYAMOTO", "YORIKI", "       ", "THANKS", "PAL",
     "MUSIC", "LUNARIAN"
 };
-#define CRED_NSTR   17
+#define CRED_NSTR   18
+
+/* 0x4826 stream after the 0x12 length prefix of each row (ids 18-22). */
+static const u8 k_cred_logo[5][CRED_LOGO_W] = {
+    { 0x20, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7,
+      0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xB2, 0xB2, 0xBD, 0x20 },
+    { 0x20, 0x20, 0x20, 0xBE, 0xBF, 0xC0, 0xC1, 0xC2, 0xC3,
+      0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0x20, 0x20, 0x20, 0x20 },
+    { 0x20, 0x20, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF,
+      0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0x20, 0x20, 0x20, 0x20 },
+    { 0x20, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC,
+      0xDD, 0xDE, 0xD9, 0xDF, 0xE0, 0xD9, 0xD9, 0xE1, 0x20 },
+    { 0xE2, 0xE3, 0xE4, 0xE5, 0xE5, 0xE5, 0xE5, 0xE5, 0xE5,
+      0xE5, 0xE5, 0xE5, 0xE5, 0xE5, 0xE5, 0xE5, 0xE5, 0xE6 }
+};
 
 static u8  s_cred_on;
 static u8  s_cred_exit;
@@ -209,6 +233,7 @@ static u16 s_cred_wait;
 static u8  s_cred_settle;
 static u16 s_cred_age;
 static u8  s_cred_dirty;
+static u8  s_cred_logo_ok;
 
 /* MSX E701 continue: last round reached this power cycle (title + C). */
 static u8  s_continue_round = 1;
@@ -1447,6 +1472,11 @@ static void bg_load_tiles(void)
     VDP_loadTileData((const u32 *)charset_tiles, s_bg_base, 256, CPU);
     apply_hud_charset_ct();
     load_bg_late();
+    /* 0x5C3C overwrites PGT 0xB0+. bg_init after cred_enter would wipe a
+     * load in cred_enter; reload here if the ending stream is up. */
+    s_cred_logo_ok = 0;
+    if (s_cred_on)
+        credits_ensure_logo_tiles();
 #else
     {
         static u32 dummy[256 * 8];
@@ -2273,6 +2303,20 @@ static void cred_clear_page(void)
     }
 }
 
+static void credits_ensure_logo_tiles(void)
+{
+    if (s_cred_logo_ok || !s_cred_on)
+        return;
+#if MAP_HAS_CHARSET
+    /* load_logo_tiles 0x5C3C: decompress 0x5D2C into PGT at 0x580 (tile 0xB0). */
+    if (s_bg_base)
+        VDP_loadTileData((const u32 *)logo_tiles,
+                         (u16)(s_bg_base + LOGO_TILE_MSX_FIRST),
+                         LOGO_TILE_COUNT, CPU);
+#endif
+    s_cred_logo_ok = 1;
+}
+
 static void cred_enter(void)
 {
     s_cred_on = 1;
@@ -2282,6 +2326,7 @@ static void cred_enter(void)
     s_cred_settle = 0;
     s_cred_age = 0;
     s_cred_dirty = 1;
+    s_cred_logo_ok = 0;
     s_ms.credits = 1;
 }
 
@@ -3277,6 +3322,7 @@ void map_script_draw_credits(void)
     if (!s_cred_dirty)
         return;
     s_cred_dirty = 0;
+    credits_ensure_logo_tiles();
     cred_clear_page();
 
     i = s_cred_idx;
@@ -3289,12 +3335,26 @@ void map_script_draw_credits(void)
         {
             const char *s = k_cred_str[id];
             u16 len = (u16)strlen(s);
-            u16 vis = (mode_get() == MODE_ORIGINAL) ? MODE_BAR_COL : cols;
-            u16 x = (vis > len) ? (u16)((vis - len) / 2) : 0;
-            if (mode_get() == MODE_ORIGINAL)
-                hud_draw_str(BG_A, x, row, s);
-            else
-                VDP_drawText(s, x, row);
+            /* Length 0 at 0x47AA: JR Z 473b still INC row. */
+            if (len)
+            {
+                u16 vis = (mode_get() == MODE_ORIGINAL) ? MODE_BAR_COL : cols;
+                u16 x = (vis > len) ? (u16)((vis - len) / 2) : 0;
+                if (mode_get() == MODE_ORIGINAL)
+                    hud_draw_str(BG_A, x, row, s);
+                else
+                    VDP_drawText(s, x, row);
+            }
+        }
+        else if (id >= CRED_LOGO0 && id <= CRED_LOGO4
+                 && mode_get() == MODE_ORIGINAL)
+        {
+            const u8 *tiles = k_cred_logo[id - CRED_LOGO0];
+            u16 t;
+
+            /* 0x4709..0x470e for len=18: x=2, then leading 0x20. Content at 3. */
+            for (t = 0; t < CRED_LOGO_W; t++)
+                hud_put_tile(BG_A, (u16)(3 + t), row, tiles[t]);
         }
         row++;
         if (row > mode_text_row(20))
