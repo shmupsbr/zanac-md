@@ -135,8 +135,10 @@ def main() -> int:
 
     if "Do not add ship X+1" not in ent:
         return fail("F: 71f6 must stay parent X / 0x81 (no ship X+1)")
-    if "mdx = mode_draw_x(s->x, 0x81)" not in ent:
-        return fail("F: flyer complement draw X is mode_draw_x(x, 0x81)")
+    if "mdx = dx" not in ent:
+        return fail("F: flyer complement draw X shares primary SAT X")
+    if "mdx = mode_draw_x(s->x, 0x81)" in ent:
+        return fail("F: do not recompute complement X from 0x81")
 
     if "VDP_setTileMapDataRow(BG_B, dst + MODE_BAR_COL, nt_y" not in mp:
         return fail("KEEP: dma_nt_row must restore HUD BG_B cols 24-31")
