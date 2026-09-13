@@ -64,7 +64,7 @@ typedef struct {
 
 void map_script_init(void);
 void map_script_init_round(u8 round);
-/* Last round reached (MSX E701 continue). Title START+C uses this. */
+/* Last E701 (0 after 92af). Title START+C boots ptrs[8-E701]. */
 u8   map_script_continue_round(void);
 void map_script_update(void);
 /* Japan 9a79 is vblank after 87e2/88ed write E800. Queue wrap NT at 97e3
