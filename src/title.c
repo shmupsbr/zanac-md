@@ -199,10 +199,11 @@ static void setup_title_palettes(void)
     VDP_setBackgroundColor(0);
 }
 
-/* 0x3803 SCORE / 0x3811 TOP, then render_lives_score 0x4996. */
+/* 0x3803 SCORE / 0x3811 TOP, then render_lives_score 0x4996 -> 0x49B5
+ * (6 BCD digits + 0x49D6 trailing 0x30) at 0x3809 / 0x3815. */
 static void draw_score_top(void)
 {
-    char buf[8];
+    char buf[9];
     u32 n;
     u8 i;
     u8 nz;
@@ -225,7 +226,8 @@ static void draw_score_top(void)
         for (k = 0; k < (u8)(5 - i); k++)
             div *= 10;
         d = (u8)((n / div) % 10);
-        if (d || nz || i == 5)
+        /* 0x49B5: lead 0 -> 0x20, including the ones place when n==0. */
+        if (d || nz)
         {
             buf[i] = (char)('0' + d);
             nz = 1;
@@ -233,7 +235,8 @@ static void draw_score_top(void)
         else
             buf[i] = ' ';
     }
-    buf[6] = 0;
+    buf[6] = '0';               /* 0x49D6 trailing 0x30 */
+    buf[7] = 0;
     draw_str_pal(buf, 9, row, PAL3);
 
     n = player_hiscore();
@@ -248,7 +251,7 @@ static void draw_score_top(void)
         for (k = 0; k < (u8)(5 - i); k++)
             div *= 10;
         d = (u8)((n / div) % 10);
-        if (d || nz || i == 5)
+        if (d || nz)
         {
             buf[i] = (char)('0' + d);
             nz = 1;
@@ -256,7 +259,8 @@ static void draw_score_top(void)
         else
             buf[i] = ' ';
     }
-    buf[6] = 0;
+    buf[6] = '0';
+    buf[7] = 0;
     draw_str_pal(buf, 21, row, PAL3);
 }
 
