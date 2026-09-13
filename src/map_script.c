@@ -235,9 +235,18 @@ static u16 s_cred_age;
 static u8  s_cred_dirty;
 static u8  s_cred_logo_ok;
 
-/* MSX E701 continue: last round reached this power cycle (title + C). */
+/* MSX E701 continue: last round reached this power cycle (title + C).
+ * 0x4118 / 0x9439 write the live resolve, including 0 after LAB_92af
+ * (stream 0xA6F4). Title 0x425A index is 8-E701 → ptrs[8] = 0xA65C. */
 static u8  s_continue_round = 1;
 static u8  s_banner_bgm_arm;
+
+/* 0x4118 / 0x9439: E701 is both the HUD round and the continue slot. */
+static void write_e701(u8 round)
+{
+    s_ms.round = round;
+    s_continue_round = round;
+}
 
 static const char *const s_cmd_name[13] = {
     "spawn_ctrl", "place_tiles", "col_groups", "tile_copy",
@@ -2054,9 +2063,7 @@ static void cmd_script_jump(u8 cmd, const u8 *ops)
             s_ms.running = FALSE;
         return;
     }
-    s_ms.round = resolve_round_from_ptr(dest);
-    if (s_ms.round >= 1 && s_ms.round <= 8)
-        s_continue_round = s_ms.round;
+    write_e701(resolve_round_from_ptr(dest));
     s_ms.pc = dest;
     /* 96de JP 9433 / 941b: reload trigger/row/PC only. MSX never writes
      * E12E/E12F/E131/E132 here — firing + cmd 12 survive the jump. */
@@ -2504,7 +2511,7 @@ static void ending_setup_91fd(void)
     sound_stop_all();
     memcpy(s_3c00, s_e800, sizeof(s_e800));
 
-    s_ms.round = resolve_round_from_ptr(0xBBB4);
+    write_e701(resolve_round_from_ptr(0xBBB4));
     s_ms.pc = 0xBBB4;
     s_ms.running = TRUE;
     s_ms.last_cmd = "91fd";
@@ -2609,7 +2616,8 @@ static void arm_ending_stream(void)
     s_e70d = 0;
     s_end_snapped = 0;
     s_end_phase = 0;
-    s_ms.round = 0;
+    /* 92af → 40DA resolve(0xA6F4) writes E701=0. Continue is table idx 8. */
+    write_e701(0);
     s_ms.pc = MAP_ENDING_STREAM;
     s_ms.row = 0;
     s_ms.running = TRUE;
@@ -3061,11 +3069,9 @@ static void script_boot(u8 round, u16 pc)
     s_cred_on = s_cred_exit = 0;
     entity_clear_enemies();
 
-    s_ms.round = round;
+    write_e701(round);
     s_ms.pc = pc;
     s_ms.running = TRUE;
-    if (round >= 1 && round <= 8)
-        s_continue_round = round;
     /* MSX 0x4225: E12D := 3 (bit0 sticky + bit1 stream). alc_recompute
      * already ran; keep bit1 so cmd-B hold SET3 (8fd4) cannot wipe the
      * R1 stream -- R1 never sends cmd 0 to re-arm bit1. */
@@ -3089,6 +3095,7 @@ void map_script_init_round(u8 round)
 {
     u8 idx;
 
+    /* Title 0x425A: index = 8 - E701. E701=0 → ptrs[8] = 0xA65C. */
     if (round > 8)
         round = 8;
     idx = (u8)(8 - round);
