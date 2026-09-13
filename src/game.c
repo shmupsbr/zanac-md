@@ -200,7 +200,7 @@ void game_update(void)
             sound_play_gameover();
         }
         /* wait_fire_or_timeout 0x46A8 calls 9393, so 4DA5 runs here too.
-         * fire_edge_detect 0x46BC is E100 bits 4/5 (A/C), not STOP. */
+         * fire_edge_detect 0x46BC is E100 bits 4/5. MD: A/B/C all fire. */
         if (pause_tick(pressed))
         {
             map_script_draw_hud();
@@ -208,13 +208,8 @@ void game_update(void)
             player_draw_over();
             return;
         }
-        if (pressed & (BUTTON_A | BUTTON_C))
+        if (pressed & (BUTTON_A | BUTTON_B | BUTTON_C))
             player_skip_over();
-        if (joy & BUTTON_B)
-        {
-            go_title();
-            return;
-        }
 
         map_script_update();
         player_update();
@@ -228,12 +223,8 @@ void game_update(void)
         return;
     }
 
-    /* B returns to title so both modes can be tried without reset. */
-    if (joy & BUTTON_B)
-    {
-        go_title();
-        return;
-    }
+    /* B is primary-only fire in play (see player_update). Do not steal
+     * it for title. Game-over / credits still exit via timer or START. */
 
     if (map_script_credits_active())
     {

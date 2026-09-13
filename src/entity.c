@@ -1634,12 +1634,20 @@ static const u8 k_t60_col[11] = {
 /* Leftover flyer SAT at become_expl. 84d1[1] is SAT 0x1C (pat 7).
  * FRAME_LEAD is that pat cropped to an 8x8 UL shard -- a shared
  * triangular yellow on every death. Japan 453E keeps +03 until 4912;
- * the yellow pose is leftover SAT + 84d1 colour, then pats 7/8/9. */
+ * the yellow pose is leftover SAT + 84d1 colour, then pats 7/8/9.
+ *
+ * Box SAT 0xD4 / complement 0xD8 must not stay. KIND_EXPL disc paint
+ * remaps every nonzero nibble of leftover FRAME_BOX (baked 15) to
+ * sat_col 0x8F — a solid white crate. Japan 4912 writes 84d1[1]
+ * 0x1C over +03; type 6 7882 writes 0x04 (pat 1 power chip / barrel)
+ * before type 63 runs. FRAME_CHIP is already excluded. */
 static int leftover_flyer_sat(u8 sat)
 {
     u16 fr;
 
     if (!sat || sat == 0x1C || sat == 0x20 || sat == 0x24 || sat == 0xD0)
+        return 0;
+    if (sat == 0xD4 || sat == 0xD8)
         return 0;
     fr = frame_from_sat(sat);
     if (fr >= FRAME_N)
@@ -1647,6 +1655,8 @@ static int leftover_flyer_sat(u8 sat)
     if (fr == FRAME_LEAD || fr == FRAME_MED_CIRCLE || fr == FRAME_CIRCLE)
         return 0;
     if (fr == FRAME_SHOT || fr == FRAME_CHIP)
+        return 0;
+    if (fr == FRAME_BOX || fr == FRAME_BOX_C)
         return 0;
     return 1;
 }
@@ -2909,10 +2919,15 @@ static void chip_step(Slot *e)
     e->vy = 0;
 }
 
-/* 0x7882: in-place type 63; SAT 0x04 / color 0x8F / pattern chip. */
+/* 0x7882: in-place type 63; SAT 0x04 / color 0x8F / pattern chip.
+ * Japan writes +03/+04/+00 on the live slot and leaves the type39
+ * box complement (71f6 is not in type63). On MD leftover FRAME_BOX
+ * + FRAME_BOX_C is the white crate; KIND_EXPL disc paint can also
+ * lock SAT 0xD4 at nibble 15. Detach first so spr_place uploads
+ * pat 1 (power chip / barrel), not the crate. */
 static void become_chip(Slot *e)
 {
-    marker_kill(e);
+    spr_detach(e);
     e->kind = KIND_CHIP;
     e->variant = 0;
     e->hp = 1;

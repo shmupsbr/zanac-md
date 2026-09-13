@@ -753,11 +753,15 @@ void player_update(void)
     if (s_alc_cadence < 255)
         s_alc_cadence++;
 
-    /* A/C = SPACE: MSX E100 bit4 clear = fire held (active-low joystick).
-     * 767e: fire NOT held -> force E110=1 and skip ALC/shot (76e9).
-     * Held: DEC E110; on 0 reload 0x14, run 76a7/76b0/76bc, try spawn.
-     * Release->repress fires next frame so E13F can index shot_rate_table. */
-    if (joy & (BUTTON_A | BUTTON_C))
+    /* MD fire split (intentional, not MSX 1:1):
+     *   A = SPACE both: primary shot + secondary fire-weapon
+     *   B = primary only (no type-3 spawn, so E14D does not DEC)
+     *   C = secondary only (type-3; fire_dec_ammo on A or C, not B)
+     * MSX E100 bit4 is one SPACE. 767e: primary NOT held -> E110=1
+     * and skip ALC/shot (76e9). Held: DEC E110; on 0 reload 0x14,
+     * 76a7/76b0/76bc, try spawn. Release->repress fires next frame
+     * so E13F can index shot_rate_table. */
+    if (joy & (BUTTON_A | BUTTON_B))
     {
         if (s_shot_cd)
             s_shot_cd--;
@@ -773,7 +777,8 @@ void player_update(void)
     else
         s_shot_cd = 1;      /* 7682-7684: LD (E110),1 while fire released */
 
-    /* bit5 held AND E380==0 -> spawn type 3. Fire 2 is also forced live on select. */
+    /* bit5 held AND E380==0 -> spawn type 3. Fire 2 is also forced live on select.
+     * A or C only — B must not spawn the depleting special. */
     if ((joy & (BUTTON_A | BUTTON_C)) || s_fire_num == 2)
         entity_try_spawn_fire(s_x, s_y, s_xvel_sel);
 
