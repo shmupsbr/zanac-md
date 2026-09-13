@@ -138,7 +138,9 @@ static void hud_digit3(u16 col, u16 row, u8 val)
     hud_put_win((u16)(col + 2), row, (u8)('0' + d0));
 }
 
-/* render_score_bcd 0x49B5: 6 digits, leading zeros -> 0x20. */
+/* render_score_bcd 0x49B5: 6 BCD digits, leading zeros -> 0x20, then
+ * 0x49D6 LD A,0x30 / OUT — a 7th tile that is always '0'. SCORE at
+ * 0x3918 and TOP at 0x38B8 are 7 cells (flash FILVRM BC=7 at 0x4ABE). */
 static void hud_score6(u16 col, u16 row, u32 score)
 {
     u8 i;
@@ -164,6 +166,7 @@ static void hud_score6(u16 col, u16 row, u32 score)
         else
             hud_put_win((u16)(col + i), row, ' ');
     }
+    hud_put_win((u16)(col + 6), row, '0');
 }
 
 /* render_hex_byte 0x4C74: ADD 0x30, CP 0x3A, ADD 0x07 for A-F. */
