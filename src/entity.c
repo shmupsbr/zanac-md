@@ -605,6 +605,7 @@ static void xor_cram_paint(Slot *s, u8 nib);
 static u8   sat_col_tile_nibble(const Slot *s, u8 want);
 static s16 sat_depth_primary(const Slot *s);
 static s16 sat_depth_marker(const Slot *s);
+static void riser_dma_sgt(Slot *s);
 
 /*
  * entity_dispatch 0x445F: SAT ptr E000, walk E300 stride 0x20 (B=0x1A).
@@ -1315,7 +1316,15 @@ static void spr_upload_color(Slot *s)
     u16 vaddr;
     const u8 *src;
 
-    if (!sp || !sp->frame || s->frame >= FRAME_N)
+    if (!sp)
+        return;
+    if (s->kind == KIND_RISER)
+    {
+        /* 873e LDIRVM SGT 0x1800, not spr_objs. */
+        riser_dma_sgt(s);
+        return;
+    }
+    if (!sp->frame || s->frame >= FRAME_N)
         return;
     ts = sp->frame->tileset;
     if (!ts || !ts->numTile)
@@ -3339,10 +3348,54 @@ static void descender_step(Slot *e)
 }
 
 /* handler_type62_invisible_riser 0x8709:
- * Yvel 8.8 FF80, pat 0, +0c=1; every-16f VRAM poke; ship-touch ->
- * INC E10A + ev8 + status. Spawned from type61 death when
- * (E140&0x3F)==(E103&0x3F). 8709 BIT 7 clear: init SET 7 / 8727 RET
- * (no 8728, no 4898). 8385 is the type write; this is the next visit. */
+ * Yvel 8.8 FF80, SAT name 0 / +04 0x87; every-16f LDIRVM SGT 0x1800
+ * (876b/878b 16x16 1bpp); ship-touch -> INC E10A + ev8 + status.
+ * Spawned from type61 death when (E140&0x3F)==(E103&0x3F).
+ * 8709 BIT 7 clear: init SET 7 / 8727 RET (no 8728, no 4898).
+ * 8385 is the type write; this is the next visit. */
+static void riser_dma_sgt(Slot *s)
+{
+    u16 vaddr;
+    u8 phase;
+    u8 want;
+
+    if (!s->spr)
+        return;
+    phase = map_script_type62_sgt_phase();
+    want = (u8)(s->sat_col & 0x0F);
+    if (!want)
+        want = 7;
+    if (s->vram_fr == (u8)(0xC0 | phase) && s->vram_nib == want)
+        return;
+    vaddr = (u16)((s->spr->attribut & TILE_INDEX_MASK) * 32);
+    DMA_queueDma(DMA_VRAM, (void *)map_script_type62_sgt(), vaddr, 64, 2);
+    s->vram_fr = (u8)(0xC0 | phase);
+    s->vram_nib = want;
+}
+
+static void riser_ensure_spr(Slot *e)
+{
+    if (e->spr)
+        return;
+    /* 16x16 AUTO_VRAM (4 tiles). Do not keep FRAME_BOX SAT 0xD4 —
+     * 8717 SAT 0 is the hitbox KEEP. */
+    e->spr = SPR_addSpriteEx(&spr_objs, mode_draw_x(e->x, e->sat_col),
+                             slot_draw_y(e),
+                             TILE_ATTR(PAL2, FALSE, FALSE, FALSE),
+                             SPR_FLAG_AUTO_VRAM_ALLOC);
+    if (!e->spr)
+        return;
+    e->spr->data = (u32)e;
+    SPR_setFrameChangeCallback(e->spr, spr_frame_cb);
+    SPR_setVisibility(e->spr, HIDDEN);
+    SPR_setPriority(e->spr, FALSE);
+    e->frame = FRAME_BOX;
+    e->sat = 0;
+    SPR_setAnimAndFrame(e->spr, 0, FRAME_BOX);
+    e->sat = 0;
+    e->spr->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
+}
+
 static void become_riser(Slot *e)
 {
     marker_kill(e);
@@ -3363,6 +3416,9 @@ static void become_riser(Slot *e)
     e->vx = 0;
     e->vy = 0;
     e->alive = 1;
+    e->frame = 0;
+    e->vram_fr = 0xFF;
+    e->vram_nib = 0xFF;
     /* 8717 SAT 0 / 871b 0x87. Leftover type-61 SAT 0xF8 is 12x16;
      * hit_overlap_slot 0→0x40 is plane 14x12. Japan 16x16. */
     e->sat = 0;
@@ -3390,16 +3446,25 @@ static void riser_step(Slot *e)
 {
     u8 old = e->clock;
 
-    /* 8728: every 16f (old&0x0f)==0 -> LDIRVM row from 876b+(old&0x10?0x20:0). */
+    /* 8728: every 16f (old&0x0f)==0 -> LDIRVM SGT 0x1800 from
+     * 876b+(old&0x10?0x20:0). Then 874a 4898. */
     e->clock = (u8)(old + 1);
     if ((old & 0x0F) == 0)
+    {
         map_script_type62_poke((u8)((old & 0x10) ? 1 : 0));
+        riser_ensure_spr(e);
+        riser_dma_sgt(e);
+        spr_sync(e);
+        e->sat = 0;
+    }
 
     /* 874a: 4898 Y_motion (+0c=1). Unsigned wrap, CP 0xD0 clears. */
     if (step_88_y_4898(e))
         return;
     e->vx = 0;
     e->vy = 0;
+    if (e->spr)
+        spr_sync(e);
 }
 
 /* type61 post-death 836b: if type==0x23, dec_encounter_a; gate to 62 or 83. */

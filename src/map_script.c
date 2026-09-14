@@ -990,9 +990,13 @@ static s16 sat_x_964c(u8 ybase, u8 blob_x)
     return (s16)(u8)((u8)((u8)(ybase << 3) + blob_x) - 0x20);
 }
 
-/* type62 8744: LDIRVM 0x20 bytes from 876b+(phase?0x20:0) -> VRAM 0x1800.
- * 24-col playfield only -- HUD cols 24-31 untouched. */
-static const u8 k_riser_nt[2][32] = {
+/* type62 8744: LDIRVM BC=0x20 from 876b+(phase?0x20:0) -> VRAM 0x1800.
+ * Japan R6=0x03: 0x1800 is SGT pattern 0 (SAT name 0), not the nametable
+ * (R2=0x0E -> NT 0x3800). Bytes are 1bpp 16x16 frames, not tile IDs.
+ * nt_put of these across PF_COLS parked a garbage charset row in E800;
+ * VSCROLL then dragged that line across the 192 after R2's first boss
+ * (cmd B row 440) when a type-61 death became type 62. */
+static const u8 k_riser_sgt[2][32] = {
     {
         0x07,0x1F,0x3F,0x7F,0x43,0x81,0xE1,0xE1,
         0x81,0x43,0x7F,0x30,0x1C,0x17,0xD0,0x38,
@@ -1007,15 +1011,53 @@ static const u8 k_riser_nt[2][32] = {
     }
 };
 
+/* Packed 4bpp 16x16 (4 tiles, TMS 16x16 order UL/LL/UR/LR -> MD UL/UR/LL/LR).
+ * Nibble 7 = cyan (SAT +04 0x87). u32 so DMA long-reads stay aligned. */
+static u32 s_riser_md4[32];
+static u8  s_riser_phase;
+
+static void pack_riser_sgt(u8 phase, u8 nib)
+{
+    const u8 *src = k_riser_sgt[phase & 1];
+    const u8 *tile[4];
+    u8 t;
+    u8 r;
+    u8 px;
+
+    /* TMS 16x16 SGT: 8+8 left (UL,LL) then 8+8 right (UR,LR). */
+    tile[0] = src;
+    tile[1] = src + 16;
+    tile[2] = src + 8;
+    tile[3] = src + 24;
+    for (t = 0; t < 4; t++)
+    {
+        for (r = 0; r < 8; r++)
+        {
+            u8 bits = tile[t][r];
+            u32 row = 0;
+
+            for (px = 0; px < 8; px++)
+                row = (row << 4) | (u32)((bits & (u8)(0x80 >> px)) ? nib : 0);
+            s_riser_md4[(u16)t * 8 + r] = row;
+        }
+    }
+    s_riser_phase = (u8)(phase & 1);
+}
+
 void map_script_type62_poke(u8 phase)
 {
-    u8 i;
-    const u8 *src = k_riser_nt[phase & 1];
-    /* Top of the 192: NT row that VSCROLL currently places at sim Y=0. */
-    u8 top = (u8)((-(s16)s_scroll_px >> 3) & 31);
+    /* 873e LDIRVM to SGT 0x1800. Do not stamp the playfield / wrap / E800. */
+    pack_riser_sgt(phase, 7);
+}
 
-    for (i = 0; i < PF_COLS; i++)
-        nt_put(i, top, src[i]);
+const u32 *map_script_type62_sgt(void)
+{
+    return s_riser_md4;
+}
+
+u8 map_script_type62_sgt_phase(void)
+{
+    return s_riser_phase;
 }
 
 /* LAB_ram_90fe / 9118: 0xE800 x 0x240. D==2: A0+ -> E7, A7-AA -> +0x3C.
