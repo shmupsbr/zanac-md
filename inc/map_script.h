@@ -133,7 +133,10 @@ void map_script_start_ending(void);
 u8   map_script_credits_active(void);
 u8   map_script_credits_exit(void);
 void map_script_draw_credits(void);
-/* type62 every-16f LDIRVM 0x1800: poke row0 24-col (ROM 876b/878b). */
+/* type62 every-16f LDIRVM VRAM 0x1800: SGT pattern 0 (ROM 876b/878b).
+ * Not a nametable poke. Packed 4bpp 16x16 (4 tiles, nibble 7 cyan). */
 void map_script_type62_poke(u8 phase);
+const u32 *map_script_type62_sgt(void);
+u8   map_script_type62_sgt_phase(void);
 
 #endif
