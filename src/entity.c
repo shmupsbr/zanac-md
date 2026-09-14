@@ -6446,19 +6446,28 @@ static void collide_player(void)
     }
 }
 
-/* TMS9918 approx sRGB. Fire 7 72de INC cycles SAT colour; MSX writes
- * one SAT byte. MD tile remap every frame starves NT DMA (blue tear).
- * Bind comet tiles to PAL2[13] once and cycle that CRAM index. */
+/* In-game PAL2 TMS→MD. Same WebMSX / V9938-default RGB24 as s_tms_pal
+ * (inc/map_script.h). Not title branding. Fire 7 72de INC cycles SAT
+ * colour; MSX writes one SAT byte. MD tile remap every frame starves NT
+ * DMA (blue tear). Bind comet tiles to PAL2[13] once and cycle CRAM. */
 #define FIRE7_CRAM_NIB  13
 static const u16 k_tms_vdp[16] = {
-    RGB24_TO_VDPCOLOR(0x000000), RGB24_TO_VDPCOLOR(0x000000),
-    RGB24_TO_VDPCOLOR(0x21C842), RGB24_TO_VDPCOLOR(0x5EDC78),
-    RGB24_TO_VDPCOLOR(0x5455ED), RGB24_TO_VDPCOLOR(0x7D76FC),
-    RGB24_TO_VDPCOLOR(0xD4524D), RGB24_TO_VDPCOLOR(0x42EBF5),
-    RGB24_TO_VDPCOLOR(0xFC5554), RGB24_TO_VDPCOLOR(0xFF7978),
-    RGB24_TO_VDPCOLOR(0xD4C154), RGB24_TO_VDPCOLOR(0xE6CE80),
-    RGB24_TO_VDPCOLOR(0x21B03B), RGB24_TO_VDPCOLOR(0xC95BBA),
-    RGB24_TO_VDPCOLOR(0xCCCCCC), RGB24_TO_VDPCOLOR(0xFFFFFF)
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_0),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_1),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_2),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_3),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_4),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_5),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_6),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_7),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_8),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_9),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_10),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_11),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_12),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_13),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_14),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_15)
 };
 
 static void fire7_cram_restore(void)
@@ -6715,17 +6724,17 @@ void entity_init(void)
     /* BE27 via alc_recompute already armed E137/E138 from BE76[0]=0x38. */
 
     /* Objs share PAL2 with the ship so index 15 stays TMS white.
-     * PAL1 index 15 remains ROUND/HUD gold (set in game/title). */
-    PAL_setPalette(PAL2, spr_objs.palette->data, CPU);
+     * PAL1 index 15 remains ROUND/HUD gold (set in game/title).
+     * Load the WebMSX / V9938-default table (not the PNG bake and not
+     * title_md_palette): Lord-Nightmare RGB24 collapsed TMS 2 and 12. */
+    PAL_setPalette(PAL2, k_tms_vdp, CPU);
     /* PAL2[2] and PAL2[3] used to be overridden to half brightness so the
      * flyers would read against the map. That was compensation for a palette
-     * bug, not fidelity: RGB24_TO_VDPCOLOR collapsed TMS 2 and TMS 12 onto one
-     * Mega Drive colour, which flattened the whole 2/12 ground stipple into a
-     * single bright green and left a light-green flyer invisible on it. With
-     * the ground rendering its real texture the flyer reads at its own colour,
-     * and darkening it is now the defect: 0x83 came out a muddy green that
-     * turned the interlocked primary/complement pair into a smudge. Compared
-     * against the same enemy in openMSX, undimmed matches and dimmed does not. */
+     * bug, not fidelity: the old RGB24 pair collapsed TMS 2 and TMS 12 onto
+     * one Mega Drive colour, which flattened the 2/12 ground stipple and left
+     * a light-green flyer invisible on it. V9938 (1,6,1) vs (1,4,1) stay
+     * distinct; do not dim flyers. Compared against the same enemy in
+     * openMSX/WebMSX, undimmed matches and dimmed does not. */
 }
 
 void entity_update(void)
