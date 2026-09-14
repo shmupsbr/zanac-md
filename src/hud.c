@@ -28,8 +28,8 @@ static void hud_fill_bar_backing(void)
      * BG_A. Tile 0x20 is also the 0x96c2 " ROUND n " space on BG_A --
      * do not bake an opaque bg into that shared id. Fill BG_B cols
      * 24-31 so 0x4BDF (03 + six 20 + 03) cannot punch leftover white. */
-    VDP_fillTileMapRect(WINDOW, blank, HUD_COL, 2, MODE_BAR_W, 24);
-    VDP_fillTileMapRect(BG_A, blank, HUD_COL, 2, MODE_BAR_W, 24);
+    VDP_fillTileMapRect(WINDOW, blank, HUD_COL, 2, MODE_BAR_W, 26);
+    VDP_fillTileMapRect(BG_A, blank, HUD_COL, 2, MODE_BAR_W, 26);
     VDP_fillTileMapRect(BG_B, blank, HUD_COL, 0, MODE_BAR_W, 32);
 }
 
@@ -232,9 +232,10 @@ static void hud_load_logo(void)
     VDP_loadTileData(hud_logo_tiles, HUD_LOGO_VDP, HUD_LOGO_TILES, CPU);
 }
 
-/* Static 6x1 miniature at MSX 17 (empty 0x4BDF row between ROUND digit
- * and FIRE). Cols 25-30 keep the 0x4BDF 03 sides. TIME is MSX 21 and
- * does not overlap; its clear restamps that border row, not this mark. */
+/* Static 6x2 miniature (good #121 Zanac + MD bands). FIRE 18-19,
+ * blank 20, logo 21-22, blank 23, TIME 24, gray hbar 25. Cols 25-30
+ * keep the 0x4BDF 03 sides. TIME no longer overlaps; its clear
+ * restamps that border row, not this mark. */
 static void hud_draw_logo(void)
 {
     u16 y0 = hud_y(HUD_LOGO_MSX_ROW);
@@ -273,7 +274,10 @@ static void hud_draw_static_labels(void)
     hud_hbar(3);
     hud_hbar(6);
     hud_hbar(9);
-    hud_hbar(23);
+    /* 0x4BDF loop still covers 10-23 (B=0x0E). TIME + closing bar
+     * sit in the bottom letterbox HUD corner so the 6x2 fits. */
+    hud_border_row(HUD_TIME_MSX_ROW);
+    hud_hbar(HUD_CLOSE_HBAR_ROW);
     hud_draw_logo();
 
     /* Inline strings after CALL 0x5C28 (opcodes ARE the ASCII). */
@@ -343,14 +347,15 @@ void hud_draw_time(u8 on, u8 e155)
         return;
     hud_ensure_labels();
 
-    row = hud_y(21);
+    row = hud_y(HUD_TIME_MSX_ROW);
     if (!on)
     {
         if (s_time_lbl)
         {
-            /* TIME is MSX 21; 6x1 logo sits at 17. Restore 0x4BDF.
-             * Do not space-fill (shared 0x20) and do not restamp the logo. */
-            hud_border_row(21);
+            /* TIME is MSX 24; 6x2 logo sits at 21-22. Restore 0x4BDF
+             * on TIME's row only. Do not space-fill (shared 0x20) and
+             * do not restamp the logo. */
+            hud_border_row(HUD_TIME_MSX_ROW);
             s_time_lbl = 0;
         }
         return;

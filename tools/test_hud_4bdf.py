@@ -88,8 +88,10 @@ def main() -> int:
         return fail("FIRE label must stay 0x3A59")
     if "hud_put_win((u16)(HUD_TEXT + 5), hud_y(18), (u8)('0' + (fire % 10)))" not in hud:
         return fail("FIRE digit must stay 0x3A5E col 30")
-    if "hud_hbar(0)" not in hud or "hud_hbar(23)" not in hud:
-        return fail("0x4C29 hbars must stay rows 0 and 23")
+    if "hud_hbar(0)" not in hud:
+        return fail("0x4C29 opening hbar must stay row 0")
+    if "hud_hbar(HUD_CLOSE_HBAR_ROW)" not in hud and "hud_hbar(25)" not in hud:
+        return fail("closing gray hbar must sit at MSX 25 (2 letterbox HUD rows)")
     if "VDP_setWindowVPos(FALSE, 2)" not in mode:
         return fail("WPV must stay 2 (rows 0-1 full-width WINDOW)")
     if "recolor_charset_tile_opaque_bg" in map_c:

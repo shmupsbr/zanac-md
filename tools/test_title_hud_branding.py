@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TITLE_MD = ROOT / "inc" / "title_md.h"
 TITLE_C = ROOT / "src" / "title.c"
 HUD_C = ROOT / "src" / "hud.c"
+HUD_H = ROOT / "inc" / "hud.h"
 HUD_LOGO_H = ROOT / "inc" / "hud_logo.h"
 HUD_LOGO_C = ROOT / "src" / "data" / "hud_logo.c"
 BUILD = ROOT / "tools" / "build_title_md.py"
@@ -34,6 +35,10 @@ BROKEN_119 = (
     0x55CC5555, 0x55CC5C55, 0x8CCCCCC2, 0x62CC02CC,
     0x62CC0CCC, 0x62CC2CCC, 0x62CCCCC0, 0x62CCCC00,
 )
+
+# First longs of the good #121 6x2 (Zanac band). The #122 6x1 clip starts
+# 0x05555555 and is only 48 words.
+GOOD_121_HEAD = (0x00005555, 0x00055555, 0x00000000, 0x00000000)
 
 
 def fail(msg: str) -> int:
@@ -98,6 +103,7 @@ def main() -> int:
         return fail("SCORE/TOP must stay on TITLE_NT0")
 
     hud = HUD_C.read_text()
+    hud_h = HUD_H.read_text()
     if "hud_draw_logo();" not in hud:
         return fail("hud_draw_static_labels must stamp the mini logo")
     if "hud_load_logo();" not in hud:
@@ -108,39 +114,70 @@ def main() -> int:
         return fail("do not opaque-recolor 0x20")
     if 'hud_str_win(HUD_TEXT, hud_y(18), "FIRE ")' not in hud:
         return fail("FIRE must stay MSX row 18")
-    if "hud_y(21)" not in hud:
-        return fail("TIME must stay MSX row 21")
+    if "HUD_TIME_MSX_ROW     24" not in hud_h:
+        return fail("TIME must sit at MSX row 24 (moved down for the 6x2)")
+    if "HUD_CLOSE_HBAR_ROW   25" not in hud_h:
+        return fail("gray closing hbar must sit at MSX row 25")
+    if "hud_y(HUD_TIME_MSX_ROW)" not in hud:
+        return fail("hud_draw_time must use HUD_TIME_MSX_ROW")
+    if "hud_hbar(HUD_CLOSE_HBAR_ROW)" not in hud:
+        return fail("closing gray bar must be HUD_CLOSE_HBAR_ROW")
+    if "hud_hbar(23)" in hud:
+        return fail("do not leave the closing hbar on MSX 23 (that is the gap below the 6x2)")
+    if "hud_y(21)" in hud:
+        return fail("do not leave TIME on MSX 21 (overlaps the 6x2 MD band)")
+
     time_fn = hud.split("void hud_draw_time(u8 on, u8 e155)", 1)
     if len(time_fn) < 2:
         return fail("hud_draw_time missing")
     time_body = time_fn[1].split("void hud_draw_player", 1)[0]
     if "hud_draw_logo();" in time_body:
-        return fail("TIME no longer overlaps the 6x1 logo — do not restamp it")
-    if "hud_border_row(21)" not in time_body:
-        return fail("TIME off must restore 0x4BDF on MSX row 21")
+        return fail("TIME no longer overlaps the 6x2 — do not restamp the logo")
+    if "hud_border_row(HUD_TIME_MSX_ROW)" not in time_body:
+        return fail("TIME off must restore 0x4BDF on TIME's row only")
     if "hud_fill_tile(WINDOW, HUD_TEXT, row, ' ', 6)" in hud:
         return fail("do not space-fill TIME's row — that would erase the logo")
 
+    layout = consts(HUD_H)
+    logo_defs = consts(HUD_LOGO_H)
+    time_row = layout.get("HUD_TIME_MSX_ROW")
+    close_row = layout.get("HUD_CLOSE_HBAR_ROW")
+    logo_row = logo_defs.get("HUD_LOGO_MSX_ROW")
+    logo_hgt = logo_defs.get("HUD_LOGO_TILE_H")
+    if not isinstance(time_row, int) or not isinstance(close_row, int):
+        return fail("HUD_TIME_MSX_ROW / HUD_CLOSE_HBAR_ROW must be integers")
+    if close_row - time_row > 2 or close_row - time_row < 1:
+        return fail("TIME must sit 1 or 2 MSX rows above the gray closing border")
+    if not isinstance(logo_row, int) or not isinstance(logo_hgt, int):
+        return fail("HUD_LOGO_MSX_ROW / HUD_LOGO_TILE_H must be integers")
+    fire_last = 19
+    gap_above = logo_row - fire_last - 1
+    gap_below = time_row - (logo_row + logo_hgt - 1) - 1
+    if gap_above != 1 or gap_below != 1:
+        return fail("logo must be equidistant: 1 blank above and below the 6x2")
+
     logo_h = HUD_LOGO_H.read_text()
-    # 6x2 cannot sit above FIRE. Empty pocket is MSX 17 (between ROUND and FIRE).
-    if "HUD_LOGO_MSX_ROW    17" not in logo_h:
-        return fail("mini logo must sit at MSX row 17 (empty pocket above FIRE)")
+    # FIRE 18-19, blank 20, 6x2 at 21-22, blank 23, TIME 24, hbar 25.
+    if "HUD_LOGO_MSX_ROW    21" not in logo_h:
+        return fail("mini logo must sit at MSX row 21 (gap below FIRE, gap above TIME)")
+    if "HUD_LOGO_MSX_ROW    17" in logo_h:
+        return fail("do not leave the #122 6x1 clip at MSX 17 (ROUND pocket)")
     if "HUD_LOGO_MSX_ROW    16" in logo_h:
         return fail("MSX 16 is the ROUND digit")
     if "HUD_LOGO_MSX_ROW    18" in logo_h:
         return fail("MSX 18 is FIRE")
     if "HUD_LOGO_MSX_ROW    20" in logo_h:
-        return fail("do not leave the mini logo on MSX row 20")
-    if "HUD_LOGO_MSX_ROW    21" in logo_h:
-        return fail("do not leave the mini logo on MSX row 21")
+        return fail("MSX 20 is the blank gap above the 6x2, not the logo")
     if "HUD_LOGO_MSX_ROW    22" in logo_h:
-        return fail("do not leave the mini logo on MSX row 22")
-    if "HUD_LOGO_MSX_ROW    17" not in HUD_BUILD.read_text():
-        return fail("build_hud_logo.py must emit HUD_LOGO_MSX_ROW 17")
+        return fail("do not start the 6x2 on MSX 22 (unequal gap / hits TIME)")
+    if "HUD_LOGO_MSX_ROW    21" not in HUD_BUILD.read_text():
+        return fail("build_hud_logo.py must emit HUD_LOGO_MSX_ROW 21")
     if "TITLE_MD_Y" in logo_h:
         return fail("do not touch title constants from the HUD logo header")
-    if "HUD_LOGO_TILE_W     6" not in logo_h or "HUD_LOGO_TILE_H     1" not in logo_h:
-        return fail("mini logo must be 6x1 (HUD interior cols 25-30, one row)")
+    if "HUD_LOGO_TILE_W     6" not in logo_h or "HUD_LOGO_TILE_H     2" not in logo_h:
+        return fail("mini logo must stay 6x2 (HUD interior cols 25-30)")
+    if "HUD_LOGO_TILE_H     1" in logo_h:
+        return fail("do not leave the #122 6x1 clip as the final mark")
     if "HUD_TILE_BASE + 256" not in logo_h:
         return fail("logo VRAM must sit after the 256-tile charset")
     if "title_md_logo.png" not in logo_h and "title_md_logo.png" not in HUD_BUILD.read_text():
@@ -152,31 +189,35 @@ def main() -> int:
     if "const u8 hud_logo_tiles" in tiles:
         return fail("do not revert hud_logo_tiles to u8")
     m = re.search(r"hud_logo_tiles\[(\d+)\]", tiles)
-    if not m or int(m.group(1)) != 48:
-        return fail("hud_logo_tiles must be 6*8 = 48 longs (192 bytes, word-aligned)")
+    if not m or int(m.group(1)) != 96:
+        return fail("hud_logo_tiles must be 12*8 = 96 longs (384 bytes, word-aligned)")
     words = [int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{8})", tiles)]
-    if len(words) != 48:
-        return fail("hud_logo_tiles must list 48 u32 values")
-    if tuple(words) == BROKEN_119:
+    if len(words) != 96:
+        return fail("hud_logo_tiles must list 96 u32 values")
+    if tuple(words[:48]) == BROKEN_119 or tuple(words) == BROKEN_119:
         return fail("do not reuse the broken #119 6x1 tile words")
+    if tuple(words[:4]) != GOOD_121_HEAD:
+        return fail("restore the good #121 6x2 tile data (Zanac band head)")
     if "extern const u32 hud_logo_tiles" not in logo_h:
         return fail("hud_logo.h must export u32 hud_logo_tiles")
     if not (ROOT / "res" / "hud_zanac_md.png").is_file():
         return fail("res/hud_zanac_md.png missing")
 
-    pix = unpack_tiles(words, 6, 1)
+    pix = unpack_tiles(words, 6, 2)
     z_blue = md_red = md_green = 0
     for y in range(8):
         row = pix[y * 48:(y + 1) * 48]
-        z_blue += sum(1 for v in row[:32] if v in (4, 5))
-        md_red += sum(1 for v in row[32:] if v in (6, 8))
-        md_green += sum(1 for v in row[32:] if v in (2, 12))
+        z_blue += sum(1 for v in row if v in (4, 5))
+    for y in range(8, 16):
+        row = pix[y * 48:(y + 1) * 48]
+        md_red += sum(1 for v in row[24:] if v in (6, 8))
+        md_green += sum(1 for v in row[24:] if v in (2, 12))
     if z_blue < 80:
-        return fail("6x1 left 4 tiles must carry the Zanac word (blue ink)")
+        return fail("6x2 top band must carry the Zanac word (blue ink)")
     if md_red < 8 or md_green < 8:
-        return fail("6x1 right 2 tiles must carry the MD mark (red + green)")
+        return fail("6x2 bottom band must carry the MD mark (red + green)")
 
-    print("ok: title Y=40 / groove 12; MD Conversion by SHMUPSBR; 6x1 HUD logo @ MSX 17")
+    print("ok: title Y=40 / groove 12; 6x2 HUD logo @ MSX 21; TIME 24 / hbar 25")
     return 0
 
 
