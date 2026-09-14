@@ -79,36 +79,27 @@ def main() -> int:
     if "hud_y(21)" not in hud:
         return fail("TIME must stay MSX row 21")
     time_fn = hud.split("void hud_draw_time(u8 on, u8 e155)", 1)
-    if len(time_fn) < 2:
-        return fail("hud_draw_time missing")
-    time_body = time_fn[1].split("void hud_draw_player", 1)[0]
-    if "hud_draw_logo();" in time_body:
-        return fail("TIME no longer overlaps the 6x1 logo — do not restamp it")
-    if "hud_border_row(21)" not in time_body:
-        return fail("TIME off must restore 0x4BDF on MSX row 21")
+    if len(time_fn) < 2 or "hud_draw_logo();" not in time_fn[1].split("void hud_draw_player", 1)[0]:
+        return fail("TIME off must restamp the mini logo (row 21 is still the MD band)")
     if "hud_fill_tile(WINDOW, HUD_TEXT, row, ' ', 6)" in hud:
         return fail("do not space-fill TIME's row — that would erase the logo")
 
     logo_h = HUD_LOGO_H.read_text()
-    # 6x2 cannot sit above FIRE. Empty pocket is MSX 17 (between ROUND and FIRE).
-    if "HUD_LOGO_MSX_ROW    17" not in logo_h:
-        return fail("mini logo must sit at MSX row 17 (empty pocket above FIRE)")
-    if "HUD_LOGO_MSX_ROW    16" in logo_h:
-        return fail("MSX 16 is the ROUND digit")
-    if "HUD_LOGO_MSX_ROW    18" in logo_h:
-        return fail("MSX 18 is FIRE")
-    if "HUD_LOGO_MSX_ROW    20" in logo_h:
-        return fail("do not leave the mini logo on MSX row 20")
+    # 21-4=17 overlaps FIRE (MSX 18). Highest clear 6x2 seat is 20.
+    if "HUD_LOGO_MSX_ROW    20" not in logo_h:
+        return fail("mini logo must sit at MSX row 20 (highest clear of FIRE)")
+    if "HUD_LOGO_MSX_ROW    17" in logo_h:
+        return fail("MSX 17 lands the MD band on FIRE row 18")
     if "HUD_LOGO_MSX_ROW    21" in logo_h:
         return fail("do not leave the mini logo on MSX row 21")
     if "HUD_LOGO_MSX_ROW    22" in logo_h:
         return fail("do not leave the mini logo on MSX row 22")
-    if "HUD_LOGO_MSX_ROW    17" not in HUD_BUILD.read_text():
-        return fail("build_hud_logo.py must emit HUD_LOGO_MSX_ROW 17")
+    if "HUD_LOGO_MSX_ROW    20" not in HUD_BUILD.read_text():
+        return fail("build_hud_logo.py must emit HUD_LOGO_MSX_ROW 20")
     if "TITLE_MD_Y" in logo_h:
         return fail("do not touch title constants from the HUD logo header")
-    if "HUD_LOGO_TILE_W     6" not in logo_h or "HUD_LOGO_TILE_H     1" not in logo_h:
-        return fail("mini logo must be 6x1 (HUD interior cols 25-30, one row)")
+    if "HUD_LOGO_TILE_W     6" not in logo_h or "HUD_LOGO_TILE_H     2" not in logo_h:
+        return fail("mini logo must stay 6x2 (HUD interior cols 25-30)")
     if "HUD_TILE_BASE + 256" not in logo_h:
         return fail("logo VRAM must sit after the 256-tile charset")
     if "title_md_logo.png" not in logo_h and "title_md_logo.png" not in HUD_BUILD.read_text():
@@ -120,17 +111,17 @@ def main() -> int:
     if "const u8 hud_logo_tiles" in tiles:
         return fail("do not revert hud_logo_tiles to u8")
     m = re.search(r"hud_logo_tiles\[(\d+)\]", tiles)
-    if not m or int(m.group(1)) != 48:
-        return fail("hud_logo_tiles must be 6*8 = 48 longs (192 bytes, word-aligned)")
+    if not m or int(m.group(1)) != 96:
+        return fail("hud_logo_tiles must be 12*8 = 96 longs (384 bytes, word-aligned)")
     words = [int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{8})", tiles)]
-    if len(words) != 48:
-        return fail("hud_logo_tiles must list 48 u32 values")
+    if len(words) != 96:
+        return fail("hud_logo_tiles must list 96 u32 values")
     if "extern const u32 hud_logo_tiles" not in logo_h:
         return fail("hud_logo.h must export u32 hud_logo_tiles")
     if not (ROOT / "res" / "hud_zanac_md.png").is_file():
         return fail("res/hud_zanac_md.png missing")
 
-    print("ok: title Y=40 / groove 12; MD Conversion by SHMUPSBR; 6x1 HUD logo @ MSX 17")
+    print("ok: title Y=40 / groove 12; MD Conversion by SHMUPSBR; 6x2 HUD logo @ MSX 20")
     return 0
 
 

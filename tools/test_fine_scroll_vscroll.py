@@ -120,6 +120,8 @@ def main() -> int:
         return fail("peek assemble must be spannable onto leftover 4")
     if "s_e711 >> 5) == 4" not in mapc and "(s_e711 >> 5) == 4" not in mapc:
         return fail("pre-assemble peek on leftover 4 (quiet), not on carry")
+    if "peek_assemble_two_ahead" not in mapc:
+        return fail("leftover 4 must be two stream steps (not one-step labeled row+2)")
 
     dma = fn_span(mapc, "static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm)")
     if not dma:
