@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Title logo drop, SHMUPSBR credit, and HUD mini-logo stay in-bounds.
+"""Title logo drop, SHMUPSBR port credit, mode-select copy, HUD mini-logo.
 
 Usage (from zanac-md):
     python tools/test_title_hud_branding.py
@@ -89,8 +89,12 @@ def main() -> int:
         return fail("tools/build_title_md.py LOGO_Y must stay 40")
 
     title = TITLE_C.read_text()
-    if 'draw_str_pal("MD Conversion by SHMUPSBR", 3, (u16)(TITLE_NT0 + 19), PAL3)' not in title:
-        return fail("conversion line must sit under COPYRIGHT at NT0+19, col 3, PAL3")
+    if 'draw_str_pal("MD PORT BY SHMUPSBR @ 2026.", 3, (u16)(TITLE_NT0 + 19), PAL3)' not in title:
+        return fail("port credit must sit under COPYRIGHT at NT0+19, col 3, PAL3")
+    if "MD Conversion by SHMUPSBR" in title or "MD CONVERSION BY SHMUPSBR" in title:
+        return fail("old MD Conversion by SHMUPSBR credit must be gone")
+    if "MD PORT BY SHMUPSBR (c)" in title or "MD PORT BY SHMUPSBR (C)" in title:
+        return fail("(c) is not a glyph; use @ like COPYRIGHT @ 1986 (pink © / year)")
     for line in (
         'draw_str_pal("GAME DESIGNED BY COMPILE", 3, (u16)(TITLE_NT0 + 15), PAL3)',
         'draw_str_pal("PRODUCED      BY AII", 3, (u16)(TITLE_NT0 + 16), PAL3)',
@@ -101,6 +105,37 @@ def main() -> int:
             return fail("do not rewrite MSX credit lines (%s)" % line)
     if "draw_score_top" not in title or "TITLE_NT0" not in title:
         return fail("SCORE/TOP must stay on TITLE_NT0")
+
+    ct = (ROOT / "res" / "charset_ct.bin").read_bytes()
+    at_ct = ct[0x40 * 8:0x40 * 8 + 8]
+    year_ct = ct[0x32 * 8:0x32 * 8 + 8]
+    if at_ct != bytes([0x90] * 8) or year_ct != bytes([0x90] * 8):
+        return fail("@ and year digits must stay CT 0x90 (COPYRIGHT pink / TMS 9)")
+    if 't == \' \' || t == \'.\' || t == \'@\'' not in title:
+        return fail("charset_tile must still pass @ so the port credit © matches COPYRIGHT")
+
+    hint = title.split("static void draw_mode_hint(void)", 1)
+    if len(hint) < 2:
+        return fail("draw_mode_hint missing")
+    hint_body = hint[1].split("static void enter_wait(void)", 1)[0]
+    if 'draw_str_cx_pal("PLEASE SELECT:"' not in hint_body:
+        return fail("mode select prompt must be PLEASE SELECT:")
+    if "FIRE START" in hint_body:
+        return fail("old FIRE START prompt must be gone")
+    if 'draw_str_cx_pal("MSX ENHANCED"' not in hint_body:
+        return fail("MODE_ORIGINAL entry must be labeled MSX ENHANCED")
+    if 'draw_str_cx_pal("ORIGINAL"' in hint_body:
+        return fail("old ORIGINAL mode label must be gone")
+    if 'draw_str_cx_pal("ZANAC MD"' not in hint_body:
+        return fail("second mode entry must stay ZANAC MD")
+    confirm = title.split("static void confirm_start(void)", 1)
+    if len(confirm) < 2:
+        return fail("confirm_start missing")
+    confirm_body = confirm[1].split("static void ", 1)[0]
+    if "MODE_ORIGINAL" not in confirm_body or "MODE_ZANAC_MD" not in confirm_body:
+        return fail("keep MODE_ORIGINAL / MODE_ZANAC_MD (s_sel 0 / 1)")
+    if "s_sel == 0" not in confirm_body:
+        return fail("s_sel 0 must still start MODE_ORIGINAL")
 
     hud = HUD_C.read_text()
     hud_h = HUD_H.read_text()
@@ -217,7 +252,8 @@ def main() -> int:
     if md_red < 8 or md_green < 8:
         return fail("6x2 bottom band must carry the MD mark (red + green)")
 
-    print("ok: title Y=40 / groove 12; 6x2 HUD logo @ MSX 21; TIME 24 / hbar 25")
+    print("ok: title Y=40 / groove 12; MD PORT BY SHMUPSBR @ 2026.; "
+          "PLEASE SELECT: / MSX ENHANCED / ZANAC MD; 6x2 HUD @ MSX 21")
     return 0
 
 

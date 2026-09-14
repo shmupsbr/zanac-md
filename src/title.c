@@ -23,8 +23,8 @@
  * The MD mark is drawn once at rest and never moves. Color 0 on both planes
  * is transparent, so the blue settles behind the mark.
  *
- * Mode pick stays small: FIRE/START = Original, a dim "ZANAC MD" row can
- * be highlighted. Do not open an SGDK START/OPTIONS menu.
+ * Mode pick stays small: PLEASE SELECT: / MSX ENHANCED / ZANAC MD.
+ * Highlight is PAL3 vs dim PAL2. Do not open an SGDK START/OPTIONS menu.
  */
 
 #define TITLE_TILE_BASE     (TILE_USER_INDEX + 32)
@@ -343,8 +343,10 @@ static void draw_title_text(void)
     draw_str_pal("PRODUCED      BY AII", 3, (u16)(TITLE_NT0 + 16), PAL3);
     draw_str_pal("PRESENTED     BY PONY INC.", 3, (u16)(TITLE_NT0 + 17), PAL3);
     draw_str_pal("COPYRIGHT @ 1986 PONY INC.", 3, (u16)(TITLE_NT0 + 18), PAL3);
-    /* Port credit. Same PAL3 charset and col 3 as the MSX lines above. */
-    draw_str_pal("MD Conversion by SHMUPSBR", 3, (u16)(TITLE_NT0 + 19), PAL3);
+    /* Port credit. Same PAL3 / col 3. '@' is the MSX © glyph (CT 0x90,
+     * TMS 9 pink) used by COPYRIGHT @ 1986, so "@ 2026." matches that
+     * line's (c) / year. Letters stay cyan A-Z like the MSX credits. */
+    draw_str_pal("MD PORT BY SHMUPSBR @ 2026.", 3, (u16)(TITLE_NT0 + 19), PAL3);
     for (i = 0; i < 3; i++)
     {
         put_tile((u16)(14 + i), (u16)(TITLE_NT0 + 20), k_mark0[i], PAL3);
@@ -424,9 +426,10 @@ static void swirl_settle(void)
 
 static void draw_mode_hint(void)
 {
-    /* Small, not a full menu. Default Original; MD is the dim second line. */
-    draw_str_cx_pal("FIRE START", (u16)(TITLE_NT0 + 22), PAL3);
-    draw_str_cx_pal("ORIGINAL", (u16)(TITLE_NT0 + 23),
+    /* Small, not a full menu. Default MSX ENHANCED (MODE_ORIGINAL);
+     * ZANAC MD is the dim second line. */
+    draw_str_cx_pal("PLEASE SELECT:", (u16)(TITLE_NT0 + 22), PAL3);
+    draw_str_cx_pal("MSX ENHANCED", (u16)(TITLE_NT0 + 23),
                     (s_sel == 0) ? PAL3 : PAL2);
     draw_str_cx_pal("ZANAC MD", (u16)(TITLE_NT0 + 24),
                     (s_sel == 0) ? PAL2 : PAL3);
