@@ -372,11 +372,16 @@ def main() -> int:
         fails += 1
     else:
         print("  KEEP: no 0xBFD6")
-    if "KIND_GROUND" not in ent or "44CA" not in ent:
-        fail("ship AABB skip KIND_GROUND (44CA) was reverted")
+    collide = re.search(
+        r"static void collide_player\(void\)\s*\{(.*?)^\}",
+        ent,
+        re.S | re.M,
+    )
+    if not collide or re.search(r"if\s*\(\s*e->kind == KIND_GROUND\s*\)", collide.group(1)):
+        fail("type 44 is 44BA; collide_player must not skip KIND_GROUND")
         fails += 1
     else:
-        print("  KEEP: ship AABB skips KIND_GROUND")
+        print("  type 44 44BA: collide_player does not skip KIND_GROUND")
 
     if fails:
         print(f"{fails} HUD dashboard restore check(s) failed", file=sys.stderr)

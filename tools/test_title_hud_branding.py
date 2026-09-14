@@ -183,6 +183,16 @@ def main() -> int:
         return fail("HUD_TIME_MSX_ROW / HUD_CLOSE_HBAR_ROW must be integers")
     if close_row - time_row > 2 or close_row - time_row < 1:
         return fail("TIME must sit 1 or 2 MSX rows above the gray closing border")
+    # Playfield is 192px = screen rows 2-25 (MSX 0-23). Letterbox is 26-27.
+    # Do not stamp opaque letter tiles on screen 25 (that steals the last
+    # playfield row). TIME/hbar live in the letterbox HUD corner.
+    mode = (ROOT / "src" / "mode.c").read_text()
+    if "VDP_fillTileMapRect(BG_A, attr, 0, 25," in mode:
+        return fail("letterbox must not stamp BG_A screen row 25 (last playfield row)")
+    if "VDP_fillTileMapRect(BG_A, attr, 0, 26, MODE_H32_COLS, 2)" not in mode:
+        return fail("bottom letterbox stays BG_A screen 26-27 (16px, not playfield)")
+    if "VDP_fillTileMapRect(WINDOW, attr, MODE_BAR_COL, 26, MODE_BAR_W, 2)" in mode:
+        return fail("do not letterbox-stamp WINDOW over TIME/hbar (screen 26-27)")
     if not isinstance(logo_row, int) or not isinstance(logo_hgt, int):
         return fail("HUD_LOGO_MSX_ROW / HUD_LOGO_TILE_H must be integers")
     fire_last = 19

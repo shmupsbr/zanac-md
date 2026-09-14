@@ -17,7 +17,7 @@ photo-proven set:
      HUD BG_B restore stays; no playfield letter fill; no opaque 0x20.
 
 KEEP: type35 leftover vel; 4898 wrap; ebullet grouping; 4BDF; 60fps;
-no 0xBFD6; half-greens; BFA0; gswoop 7f54; ship AABB skip KIND_GROUND.
+no 0xBFD6; half-greens; BFA0; gswoop 7f54; type 44 44BA.
 
 Usage (from zanac-md):
     python tools/test_playtest_letterbox.py
@@ -153,8 +153,13 @@ def main() -> int:
         return fail("KEEP: no CALL 0xBFD6")
     if "k_flyer_green_dim" in ent:
         return fail("KEEP: no PAL2 half-green override (it hid the 2/12 stipple bug)")
-    if "KIND_GROUND" not in ent or "44CA" not in ent:
-        return fail("KEEP: ship AABB skip KIND_GROUND")
+    collide = re.search(
+        r"static void collide_player\(void\)\s*\{(.*?)^\}",
+        ent,
+        re.S | re.M,
+    )
+    if not collide or re.search(r"if\s*\(\s*e->kind == KIND_GROUND\s*\)", collide.group(1)):
+        return fail("type 44 is 44BA; collide_player must not skip KIND_GROUND")
 
     print("ok: playtest A-G + KEEP (wrap=sat_to_nt(0), 1x1 eyes, ship Y+2, expl)")
     return 0

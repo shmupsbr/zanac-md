@@ -294,11 +294,14 @@ def main() -> int:
         print("  KEEP: type 21 8659 R-nibble|0x80 on armed visit")
 
     collide = fn_span(ent, "static void collide_player(void)")
-    if not collide or "KIND_GROUND" not in collide:
-        fail("collide_player must still skip KIND_GROUND")
+    if not collide:
+        fail("collide_player not found")
+        fails += 1
+    elif re.search(r"if\s*\(\s*e->kind == KIND_GROUND\s*\)", collide):
+        fail("type 44 is 44BA; collide_player must not skip KIND_GROUND")
         fails += 1
     else:
-        print("  KEEP: ship AABB still skips KIND_GROUND")
+        print("  type 44 44BA: collide_player does not skip KIND_GROUND")
 
     if "player_fire_mode" not in hdr:
         fail("player.h must keep player_fire_mode (E14E)")

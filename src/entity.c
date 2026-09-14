@@ -89,8 +89,9 @@
  *           (86a4 cancel; 7710 DEC wraps 0→255), fire_select, bfc8
  *   44      ground  - 82d0: 71c5 (Y=0, X=(H&7F)+(L&1F)+0x28), then
  *           aim_4c91+set_vel 8.8 speed (R&3)+1, +0c=3, 3 hp;
- *           SAT 0x40 plane / col-marker 0x44 plane_compl (cyan 0x83);
- *           spr FRAME_PLANE + FRAME_PLANE_C (type39, unfolded).
+ *           SAT 0x40 plane / col-marker 0x44 plane_compl;
+ *           +04=0x83 TMS 3 light green (the green flyer). 82ff JP 44BA
+ *           (ship + shots). spr FRAME_PLANE + FRAME_PLANE_C.
  *           82f9 CALL 4898: u8 wrap-cull Y>=0xD0 / X>=0xD1
  *           (not playfield max_y / max_x+16).
  *   64      proto   - 8279: spawn_type_list[E130/2+R&3], write +00, RET.
@@ -1953,10 +1954,9 @@ static u8 post_flags(u8 t)
     /* no entity_post: spawners, explosion, husk, marker, clear */
     if (t == 11 || t == 69 || t == 35 || t == 60 || t == 80 || t == 39 || t == 40 || t == 0)
         return 0;
-    /* 44CA shots-only ground structures / bases / firebox / wide.
-     * Type 44 is 44BA on MSX; Original mode still ignores ship AABB (44CA)
-     * so the plane/husk never kills the player. */
-    if (t == 44 || t == 69 || t == 70 || t == 71 || t == 81 || t == 82
+    /* 44CA shots-only: wide/idol/firebox/base (8806 / 8b7a).
+     * Type 44 is 44BA (82ff JP 44BA), not this list. */
+    if (t == 69 || t == 70 || t == 71 || t == 81 || t == 82
         || (t >= 73 && t <= 79) || (t >= 84 && t <= 89))
         return POST_SHOT;
     /* full entity_post 44BA (airborne, type21/36/44/45, guns, ...) */
@@ -2005,7 +2005,7 @@ static int enemy_takes_shots(const Slot *e)
 
 /* Fire vs enemy. 44F9 BIT 1,E14E after the three shot slots; 44D4 AND 1
  * before the ship check. 44CA is 44F9 only; 44A6 is 44D4 only; 44BA is both.
- * Type 44 is 44BA on MSX — ship AABB skip (KIND_GROUND) is the leave-alone. */
+ * Type 44 is 44BA (82ff): ship + shots. Do not treat it as 44CA. */
 static int enemy_takes_fire(const Slot *e)
 {
     u8 et = slot_msx_type(e);
@@ -2398,8 +2398,9 @@ static void spawn_ground_fall(Slot *e, u8 type, s16 x, s16 y, u16 dest)
      * time). Map-script entity_place_ground keeps its XY.
      * +0x17 = (R&3)+1; player_pos_snapshot 4c8b (= aim_4c91 +
      * set_velocity_from_dir 8.8); +0c=3 X|Y motion; +03=0x40 plane,
-     * +04=0x83 cyan; spawn_col_marker SAT 0x44. Port: dest/bind/
-     * script/timer 8.8 like type20/37; vx/vy 0 so shared pass inert. */
+     * +04=0x83 TMS 3 green (82f1); spawn_col_marker SAT 0x44.
+     * 82ff JP 44BA. Port: dest/bind/script/timer 8.8 like type20/37;
+     * vx/vy 0 so shared pass inert. */
     u8 speed = (u8)((rnd() & 3) + 1);
     u8 sat = (u8)((dest & 0xFF) ? (dest & 0xFF) : 0x40);
 
@@ -2412,7 +2413,7 @@ static void spawn_ground_fall(Slot *e, u8 type, s16 x, s16 y, u16 dest)
     e->y = y;
     e->alive = 1;
     apply_dir_88(e, aim_4c91(x, y), speed);
-    e->sat_col = 0x83;               /* 82d0 +04 cyan; TMS EC bit7 */
+    e->sat_col = 0x83;               /* 82f1 +04 TMS 3 green; EC bit7 */
     spr_place(e, FRAME_PLANE);       /* visual plane; hitbox from sat */
     e->sat = sat;
     marker_place(e, FRAME_PLANE_C);  /* spawn_col_marker SAT 0x44 */
@@ -6346,8 +6347,9 @@ static void collide_player(void)
             continue;          /* 782c: no entity_post / SAT is countdown */
         if (e->kind == KIND_CIRCLE && !(e->aux & 0x40))
             continue;          /* 83ee: idle XOR only, no 44BA */
-        if (e->kind == KIND_GROUND)
-            continue;          /* ship AABB ignores ground (44CA) */
+        /* Type 44 KIND_GROUND is 44BA on MSX (82ff JP 44BA). sat_col
+         * 0x83 is TMS 3 light green — the green flyer. Do not skip it
+         * as 44CA; that let the plane pass through the ship. */
         /* 0x453E path: only types on a ship leg (44BA/44B0/44A6) count.
          * Shots-only structures (44CA) and no-post types are ignored. */
         et = slot_msx_type(e);
@@ -6355,7 +6357,7 @@ static void collide_player(void)
         if (!(pf & POST_SHIP))
             continue;
         {
-            /* 4560 SAT vs SAT. Ship AABB still skips KIND_GROUND (44CA). */
+            /* 4560 SAT vs SAT. Type 44 uses SAT 0x40 (14x12) like 45A0. */
             if (!hit_overlap_slot(px, py, SAT_PLAYER, e))
                 continue;
         }
