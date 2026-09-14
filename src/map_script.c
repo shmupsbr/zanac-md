@@ -153,6 +153,7 @@ static void fire_pending(void);
 static void scroll_precompute(u16 map_row);
 static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm);
 static void peek_assemble_row(u16 map_row);
+static void peek_assemble_two_ahead(void);
 static void peek_next_row_at(u16 map_row, u16 wrap_px);
 static void peek_next_row(u16 map_row);
 static u8 hidden_wrap_nt_at(u16 scroll_px);
@@ -843,12 +844,42 @@ static void peek_assemble_row(u16 map_row)
     s_peek_maprow = map_row;
 }
 
+/*
+ * leftover 4 is two 97e3-steps ahead of the last real assemble.
+ * One assemble_row from the current stream is the NEXT 97e3 row
+ * (R+1), not R+2. Caching that as row+2 made commit_wrap DMA the
+ * same tiles into wrap(pre) and the peek sliver — an ~8px duplicated
+ * band at the playfield top when ground / boss tiles entered.
+ * Step once (discard), step again (keep), then restore.
+ */
+static void peek_assemble_two_ahead(void)
+{
+    u8 x;
+    u8 idol_snap;
+
+    memcpy(s_col_snap, s_col, sizeof(s_col));
+    memcpy(s_stream_snap, s_stream, sizeof(s_stream));
+    idol_snap = s_idol_cur;
+    s_assemble_peek = 1;
+    assemble_row((u16)(s_ms.row + 1));
+    assemble_row((u16)(s_ms.row + 2));
+    s_assemble_peek = 0;
+    for (x = 0; x < PF_COLS; x++)
+        s_peek_line[x] = s_rowbuf[ASM_SKIP + x];
+    memcpy(s_col, s_col_snap, sizeof(s_col));
+    memcpy(s_stream, s_stream_snap, sizeof(s_stream));
+    s_idol_cur = idol_snap;
+    s_peek_have = 1;
+    s_peek_maprow = (u16)(s_ms.row + 2);
+}
+
 static void peek_next_row_at(u16 map_row, u16 wrap_px)
 {
     if (s_ram_only)
         return;
-    /* Quiet leftover frames pre-assemble row+2 so the carry tick is
-     * 97e3 + DMA only. Cmd 9 jumps discard a mismatched cache. */
+    /* Quiet leftover frames pre-assemble row+2 (two stream steps) so
+     * the carry tick is 97e3 + DMA only. Cmd 9 jumps discard a
+     * mismatched cache. */
     if (!(s_peek_have && s_peek_maprow == map_row))
         peek_assemble_row(map_row);
     s_peek_have = 0;
@@ -3330,9 +3361,11 @@ void map_script_update(void)
                  && !s_clr_phase && !s_end_phase)
         {
             /* Spread peek assemble onto leftover 4 (quiet). Carry
-             * then only 97e3-places + commit_wrap DMA. row+2 is the
-             * peek target after the next INC. */
-            peek_assemble_row((u16)(s_ms.row + 2));
+             * then only 97e3-places + commit_wrap DMA. Two stream
+             * steps: R+1 is the next 97e3 row; R+2 is the peek
+             * after that INC. One step labeled row+2 is a duplicate
+             * of the incoming 97e3 row in the visible top sliver. */
+            peek_assemble_two_ahead();
         }
         lab_9251_tick();
         /* 8f5e is CALL 0x4077 (main loop), not 0x46A8. GO wait is
