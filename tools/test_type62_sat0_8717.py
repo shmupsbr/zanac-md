@@ -17,7 +17,7 @@ zanac.asm Japan v1 (SHA1 46e9ed7b7f6dfda8eee266476c9ebc4dd9d8fcc2):
   Type 61 death 8385 writes 0x3E on the same slot (SAT still 0xF8).
   Port become_riser must stamp 8717/871b so 44B0 uses 16x16.
 
-KEEP: 8727 first-visit RET; type 62 lives-only; ship AABB KIND_GROUND;
+KEEP: 8727 first-visit RET; type 62 lives-only; type 44 44BA;
 s_riser_init_ret; no 0xBFD6.
 
 Usage (from zanac-md):
@@ -165,7 +165,7 @@ def main() -> int:
     else:
         print("  hit_overlap_slot: KIND_RISER SAT 0")
 
-    # KEEP: 8727 first-visit RET; lives-only; ship AABB.
+    # KEEP: 8727 first-visit RET; lives-only; type 44 44BA.
     if "s_riser_init_ret" not in ent:
         fail("KEEP: s_riser_init_ret was reverted")
         fails += 1
@@ -180,11 +180,14 @@ def main() -> int:
         print("  KEEP: type 62 lives-only")
 
     collide = fn_span(ent, "static void collide_player(void)")
-    if not collide or "KIND_GROUND" not in collide:
-        fail("KEEP: ship AABB still skips KIND_GROUND")
+    if not collide:
+        fail("collide_player not found")
+        fails += 1
+    elif re.search(r"if\s*\(\s*e->kind == KIND_GROUND\s*\)", collide):
+        fail("type 44 is 44BA; collide_player must not skip KIND_GROUND")
         fails += 1
     else:
-        print("  KEEP: ship AABB skips KIND_GROUND")
+        print("  type 44 44BA: collide_player does not skip KIND_GROUND")
 
     if "0xBFD6" in ent or "0xbfd6" in ent:
         fail("KEEP: no 0xBFD6")

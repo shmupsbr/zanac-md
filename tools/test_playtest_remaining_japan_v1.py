@@ -21,7 +21,7 @@ ground=1 on type44/guns, invented totem 0x28 punch).
   7) R1 eyes: type 75 is 1x1 0xBF+phase. sat_x_964c() 8-bit stays.
 
 KEEP: 964C 8-bit; 4898 wrap; ebullet grouping; 4BDF; wrap/peek; 60fps;
-no 0xBFD6; half-greens; BFA0; gswoop 7f54; ship AABB KIND_GROUND;
+no 0xBFD6; half-greens; BFA0; gswoop 7f54; type 44 44BA;
 type35 leftover vel OK.
 
 Usage (from zanac-md):
@@ -279,8 +279,13 @@ def main() -> int:
         return fail("KEEP: no CALL 0xBFD6")
     if "k_flyer_green_dim" in ent:
         return fail("KEEP: no PAL2 half-green override")
-    if "KIND_GROUND" not in ent or "44CA" not in ent:
-        return fail("KEEP: ship AABB skip KIND_GROUND")
+    collide = re.search(
+        r"static void collide_player\(void\)\s*\{(.*?)^\}",
+        ent,
+        re.S | re.M,
+    )
+    if not collide or re.search(r"if\s*\(\s*e->kind == KIND_GROUND\s*\)", collide.group(1)):
+        return fail("type 44 is 44BA; collide_player must not skip KIND_GROUND")
     if "KIND_TRACKER" not in ent or "KIND_VEYBAR" not in ent:
         return fail("KEEP: ebullet grouping kinds")
     if "7f54" not in ent:

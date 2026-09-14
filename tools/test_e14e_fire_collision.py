@@ -20,7 +20,7 @@ zanac.asm Japan v1 (SHA1 46e9ed7b7f6dfda8eee266476c9ebc4dd9d8fcc2):
   Old port wrote s_fire_mode from the table and never read it, so every
   live fire damaged idols/bases and no fire ate 20/37/38/41/42/43.
 
-  Type 44 stays 44BA for fire (ship AABB skip is the leave-alone).
+  Type 44 stays 44BA for fire and ship (82ff JP 44BA).
   7609 CALL BFD6 stays unported.
 
 Usage (from zanac-md):
@@ -246,11 +246,14 @@ def main() -> int:
         print("  collide_bolt_enemies: fire E14E / shots 44F9")
 
     collide = fn_span(ent, "static void collide_player(void)")
-    if not collide or "KIND_GROUND" not in collide:
-        fail("collide_player must still skip KIND_GROUND (ship 44CA leave-alone)")
+    if not collide:
+        fail("collide_player not found")
+        fails += 1
+    elif re.search(r"if\s*\(\s*e->kind == KIND_GROUND\s*\)", collide):
+        fail("type 44 is 44BA; collide_player must not skip KIND_GROUND")
         fails += 1
     else:
-        print("  KEEP: ship AABB still skips KIND_GROUND")
+        print("  type 44 44BA: collide_player does not skip KIND_GROUND")
 
     # KEEP: shipped items and leave-alones this hunt must not revert.
     resp = fn_span(ply, "static void respawn(void)")

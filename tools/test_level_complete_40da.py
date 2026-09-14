@@ -277,11 +277,12 @@ def main() -> int:
         fails += 1
     else:
         print("  KEEP: 4898 Y>=0xD0 / X>=0xD1")
-    if "KIND_GROUND" not in ent or "ship AABB ignores ground" not in ent:
-        fail("ship AABB skip KIND_GROUND was reverted")
+    collide = fn_span(ent, "static void collide_player(void)")
+    if not collide or re.search(r"if\s*\(\s*e->kind == KIND_GROUND\s*\)", collide):
+        fail("type 44 is 44BA; collide_player must not skip KIND_GROUND")
         fails += 1
     else:
-        print("  KEEP: ship AABB skips KIND_GROUND")
+        print("  type 44 44BA: collide_player does not skip KIND_GROUND")
     if "pre-carry" not in mapc and "pre-carry pixel" not in mapc:
         fail("#92 pre-carry wrap comment/path missing")
         fails += 1

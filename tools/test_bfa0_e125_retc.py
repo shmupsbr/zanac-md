@@ -335,8 +335,8 @@ def main() -> int:
     if not collide:
         fail("collide_player not found")
         fails += 1
-    elif "if (e->kind == KIND_GROUND)" not in collide:
-        fail("ship AABB must still skip KIND_GROUND (44CA leave-alone)")
+    elif re.search(r"if\s*\(\s*e->kind == KIND_GROUND\s*\)", collide):
+        fail("type 44 is 44BA (82ff); collide_player must not skip KIND_GROUND")
         fails += 1
     elif "if (player_dead() || player_is_over())" not in collide:
         fail("collide_player must skip only dead/over")
@@ -345,7 +345,7 @@ def main() -> int:
         fail("collide_player must not skip on s_invuln")
         fails += 1
     else:
-        print("  KEEP: ship AABB skips KIND_GROUND; collide skips only dead/over")
+        print("  type 44 44BA: collide_player does not skip KIND_GROUND")
 
     if "s_ebullet_init_ret" not in ent:
         fail("s_ebullet_init_ret for 21/37/38/41/42/43 was reverted")
