@@ -143,10 +143,10 @@ void mode_draw_letterbox(void)
     VDP_fillTileMapRect(BG_A, attr, 0, 0, MODE_H32_COLS, 2);
     VDP_fillTileMapRect(BG_A, attr, 0, 26, MODE_H32_COLS, 2);
     /* WPV=2: rows 0-1 are full-width WINDOW. Opaque PAL0 black here hides
-     * the NT 31 peek that VSCROLL parks in screen Y 8-15. HUD cols 24-31
-     * of the bottom bar stay WINDOW so tile 0 cannot stripe the corner. */
+     * the NT 31 peek that VSCROLL parks in screen Y 8-15. Bottom HUD
+     * cols 24-31 (screen 26-27 / MSX 24-25) hold TIME + the closing
+     * hbar — do not stamp letter tiles over that corner. */
     VDP_fillTileMapRect(WINDOW, attr, 0, 0, MODE_H32_COLS, 2);
-    VDP_fillTileMapRect(WINDOW, attr, MODE_BAR_COL, 26, MODE_BAR_W, 2);
 }
 
 void mode_backdrop_flash(int on)

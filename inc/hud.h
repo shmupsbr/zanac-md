@@ -12,6 +12,13 @@
  */
 #define HUD_TILE_BASE   (TILE_USER_INDEX + 32)
 
+/* Dashboard column below FIRE. FIRE stays 18-19; one blank; 6x2 logo;
+ * one blank; TIME; closing gray hbar. TIME uses the bottom letterbox
+ * HUD corner (screen 26) so the 6x2 is equidistant between FIRE and
+ * TIME. TIME is 1 row above the hbar (≤2). */
+#define HUD_TIME_MSX_ROW     24
+#define HUD_CLOSE_HBAR_ROW   25
+
 void hud_init(void);
 void hud_draw_alc(void);
 void hud_draw_round(u8 round);
