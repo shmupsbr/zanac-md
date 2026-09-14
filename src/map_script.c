@@ -354,46 +354,33 @@ static u16 op_len(u8 cmd, const u8 *ops)
 
 /* ---- TMS9918 palette on PAL3, charset (or dummy) on BG_B ---- */
 
-/* TMS9918A palette as Mega Drive colours.
+/* In-game PAL3 TMS→MD. WebMSX / original-MSX (V9938 default triples),
+ * not title branding (title_md_palette / title logo CRAM stay put).
  *
- * Entry 12 is NOT written through RGB24_TO_VDPCOLOR, and that is the point.
- * The macro rounds each channel up by 0x10 before masking to the MD's 3 bits,
- * which maps TMS 2 (0x21C842) and TMS 12 (0x21B03B) onto the SAME colour,
- * 0x4C2. Those two greens are the entire ground texture: charset tiles 0x25,
- * 0x26 and 0x27 are nothing but a 2/12 stipple, so collapsing them renders
- * every land tile as one flat green. Measured: with the whole playfield forced
- * to tile 0x26, the frame contained a single green (49,206,87) and no second
- * one, while the same scene on openMSX is roughly half colour 2 and half
- * colour 12.
+ * RGB24 is n*32 so RGB24_TO_VDPCOLOR keeps each V9938 triple. Index 2
+ * (1,6,1) and 12 (1,4,1) stay distinct after MD quantization — the old
+ * Lord-Nightmare pair 0x21C842 / 0x21B03B collapsed onto one CRAM word
+ * and flattened charset 0x25/0x26/0x27 (2/12 ground stipple).
  *
- * Plain nearest-level rounding does not help -- both greens round to 0x4A2 --
- * so the pair has to be separated on purpose. Searching every distinguishable
- * MD pair for the lowest channel error while keeping the original luminance
- * gap (14.9) gives 2 -> 0x4C2, 12 -> 0x4A2: squared error 660, gap 21.7, the
- * best of the field. Entry 2 keeps the value it already had, so this changes
- * exactly one colour.
- *
- * Entry 8 is also written out: Filipe's red-pink ground (tiles 0x17/0x18
- * 6/8 stipple) sat on RGB24_TO_VDPCOLOR(0xFC5554) = 0x066E and swallowed
- * BONUS digits (PAL3[9]) plus pink flyers (PAL2[8/9]). TMS_DARK_RED_PINK
- * is that slot ~20% darker; enemy/BONUS CRAM is not this index. */
+ * PAL3[8] is TMS_DARK_RED_PINK: #116 intent, recomputed ~20% darker than
+ * the new medium-red base so 6/8 ground does not swallow BONUS / PAL2. */
 static const u16 s_tms_pal[16] = {
-    RGB24_TO_VDPCOLOR(0x000000),
-    RGB24_TO_VDPCOLOR(0x000000),
-    RGB24_TO_VDPCOLOR(0x21C842),
-    RGB24_TO_VDPCOLOR(0x5EDC78),
-    RGB24_TO_VDPCOLOR(0x5455ED),
-    RGB24_TO_VDPCOLOR(0x7D76FC),
-    RGB24_TO_VDPCOLOR(0xD4524D),
-    RGB24_TO_VDPCOLOR(0x42EBF5),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_0),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_1),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_2),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_3),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_4),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_5),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_6),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_7),
     TMS_DARK_RED_PINK,
-    RGB24_TO_VDPCOLOR(0xFF7978),
-    RGB24_TO_VDPCOLOR(0xD4C154),
-    RGB24_TO_VDPCOLOR(0xE6CE80),
-    TMS_DARK_GREEN,
-    RGB24_TO_VDPCOLOR(0xC95BBA),
-    RGB24_TO_VDPCOLOR(0xCCCCCC),
-    RGB24_TO_VDPCOLOR(0xFFFFFF)
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_9),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_10),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_11),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_12),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_13),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_14),
+    RGB24_TO_VDPCOLOR(TMS_GAME_RGB_15)
 };
 
 static void select_tables(u16 map_row)

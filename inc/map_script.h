@@ -3,22 +3,40 @@
 
 #include <genesis.h>
 
-/* TMS9918A colour 12 (0x21B03B) as a Mega Drive colour, written out instead of
- * built with RGB24_TO_VDPCOLOR. The macro rounds each channel up before masking
- * to 3 bits and lands colour 12 on the same value as colour 2 (0x21C842), and
- * those two greens ARE the ground texture -- charset tiles 0x25/0x26/0x27 are a
- * 2/12 stipple and nothing else. Collapsed, every land tile renders flat.
- * Nearest-level rounding collides too; the pair has to be separated on purpose.
- * See the derivation above s_tms_pal in src/map_script.c. */
+/* Title-only (k_tms in src/title.c). Lord-Nightmare 0x21C842 / 0x21B03B
+ * collapse through RGB24_TO_VDPCOLOR; this word keeps title charset 12 off
+ * colour 2. In-game PAL3[12] uses TMS_GAME_RGB_12 instead — do not retarget
+ * title opening / title_md_palette here. */
 #define TMS_DARK_GREEN  0x04A2
 
-/* Intentional MD diverge (Filipe): TMS 8 is the bright half of the red-pink
- * ground (charset 0x17/0x18/0x19 are a 6/8 stipple). RGB24_TO_VDPCOLOR of
- * TMS 8 (0xFC5554) is CRAM 0x066E — too close to PAL3[9] BONUS digits
- * (0xFF7978 / 0x088E) and to PAL2 asteroids/flyers that keep SAT 0x88/0x89.
- * ~20% darker: 0xFC5554 * 0.8 = 0xCA4443 → nearest legal 3-bit (6,2,2) =
- * 0x044C. PAL3[6]/PAL3[9] and PAL2 are unchanged so enemy/BONUS ink stays. */
-#define TMS_DARK_RED_PINK  0x044C
+/* In-game TMS→MD RGB24. WebMSX / original-MSX look = V9938 default 3-bit
+ * triples, each channel n*32 so RGB24_TO_VDPCOLOR (+0x10, top 3 bits) keeps
+ * the triple. Not title branding. Lord-Nightmare 0x21C842/0x21B03B washed
+ * the playfield and mapped 2 and 12 onto one CRAM word. */
+#define TMS_GAME_RGB_0   0x000000  /* (0,0,0) */
+#define TMS_GAME_RGB_1   0x000000  /* (0,0,0) */
+#define TMS_GAME_RGB_2   0x20C020  /* (1,6,1) medium green */
+#define TMS_GAME_RGB_3   0x60E060  /* (3,7,3) light green */
+#define TMS_GAME_RGB_4   0x2020E0  /* (1,1,7) dark blue */
+#define TMS_GAME_RGB_5   0x4060E0  /* (2,3,7) light blue */
+#define TMS_GAME_RGB_6   0xA02020  /* (5,1,1) dark red */
+#define TMS_GAME_RGB_7   0x40C0E0  /* (2,6,7) cyan */
+#define TMS_GAME_RGB_8   0xE02020  /* (7,1,1) medium red */
+#define TMS_GAME_RGB_9   0xE06060  /* (7,3,3) light red */
+#define TMS_GAME_RGB_10  0xC0C020  /* (6,6,1) dark yellow */
+#define TMS_GAME_RGB_11  0xC0C080  /* (6,6,4) light yellow */
+#define TMS_GAME_RGB_12  0x208020  /* (1,4,1) dark green — must ≠ 2 */
+#define TMS_GAME_RGB_13  0xC040A0  /* (6,2,5) magenta */
+#define TMS_GAME_RGB_14  0xA0A0A0  /* (5,5,5) gray */
+#define TMS_GAME_RGB_15  0xE0E0E0  /* (7,7,7) white */
+
+/* Intentional MD diverge (Filipe, #116): PAL3[8] only. TMS 8 is the bright
+ * half of the red-pink ground (charset 0x17/0x18/0x19 are a 6/8 stipple).
+ * Recomputed from the V9938 medium-red base, not the old washed CRAM:
+ * TMS_GAME_RGB_8 0xE02020 * 0.8 = 0xB41919 → (6,1,1) = 0x022C.
+ * PAL2[8] (k_tms_vdp) stays the full (7,1,1) so asteroids/flyers read;
+ * PAL3[9] BONUS digits use TMS_GAME_RGB_9. */
+#define TMS_DARK_RED_PINK  0x022C
 
 /*
  * MSX map-script interpreter.
