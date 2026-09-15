@@ -153,6 +153,25 @@ def main() -> int:
         return fail("static shot/lead/bar tiles must hit a shared VRAM bank")
     if "shot_vram_remember" not in ent:
         return fail("first shot/lead upload must be remembered for later sprites")
+    if re.search(r"VDP_allocateTiles\s*\(", ent) or re.search(
+        r"VDP_releaseTiles\s*\(", ent
+    ):
+        return fail("Filipe SGDK 2.11 has no VDP_allocateTiles/releaseTiles")
+    if "SPR_setVRAMTileIndex" not in ent:
+        return fail("later shots must SPR_setVRAMTileIndex onto the banked index")
+    cache = re.search(
+        r"static int shot_vram_cacheable\(const Slot \*s, u8 want\)\s*\{(.*?)^\}",
+        ent,
+        re.S | re.M,
+    )
+    if not cache:
+        return fail("shot_vram_cacheable not found")
+    if "variant == 21" in cache.group(1) and "return 0" in cache.group(1):
+        return fail("type 21 light bars must share the shot VRAM bank")
+    if "LIGHTBAR_CRAM_NIB" not in ent:
+        return fail("type 21 8659 must CRAM-bind (LIGHTBAR_CRAM_NIB), not remap")
+    if not re.search(r"LIGHTBAR_CRAM_NIB\s+4", ent):
+        return fail("type 21 CRAM nibble must be 4 (FRAME_LIGHT_BAR bake)")
     if "spr_sync_proj" not in ent:
         return fail("fire/ebullet/shots need a cheap position+clip sync")
     proj = re.search(
@@ -198,7 +217,8 @@ def main() -> int:
 
     print("ok: SPR_update; doVBlank; flush; DMA budget raised; no 30fps cap")
     print("ok: shared XOR CRAM; nibble DMA defer; depth bind at place only")
-    print("ok: shot VRAM bank; spr_sync_proj; SAT-box collision early-out")
+    print("ok: shot VRAM bank via SPR_setVRAMTileIndex; type 21 PAL2[4] CRAM")
+    print("ok: spr_sync_proj; SAT-box collision early-out")
     return 0
 
 

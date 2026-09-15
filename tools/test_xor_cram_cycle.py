@@ -106,6 +106,20 @@ def main() -> int:
         return fail("type 67 83d8 SAT^=0x34 is not a colour-only walker")
     if "variant == 21" not in wanted:
         return fail("type 21 8659 random colour must CRAM")
+    if "LIGHTBAR_CRAM_NIB" not in ent:
+        return fail("type 21 must own a dedicated CRAM nibble (not XOR pool 2)")
+    if not re.search(r"LIGHTBAR_CRAM_NIB\s+4", ent):
+        return fail("type 21 CRAM must be PAL2[4] (FRAME_LIGHT_BAR bake)")
+    alloc = fn_span(ent, "static u8 xor_cram_alloc(const Slot *s)")
+    if not alloc or "LIGHTBAR_CRAM_NIB" not in alloc:
+        return fail("xor_cram_alloc must always return LIGHTBAR_CRAM_NIB for type 21")
+    bind = fn_span(ent, "static int xor_cram_bind(Slot *s, u8 col)")
+    if not bind:
+        return fail("xor_cram_bind not found")
+    if "variant == 21" not in bind:
+        return fail("type 21 must CRAM-bind even without a hardware sprite")
+    if "xor_cram_cycle" not in setc:
+        return fail("spr_set_sat_col must CRAM-cycle after bind")
     if "variant == 45" in wanted:
         return fail("type 45 8625 bar/med must not CRAM")
     if "KIND_LUSTER" not in wanted or "KIND_STEALTH" not in wanted:

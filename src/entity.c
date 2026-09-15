@@ -347,6 +347,10 @@
 #define KIND_FIRE       3
 /* Fire 0/1/2/7 72de owns PAL2[13]. Shot-bank keys use the same index. */
 #define FIRE7_CRAM_NIB  13
+/* Type 21 8659 colour-walk: FRAME_LIGHT_BAR is the only baked-4 art.
+ * Bind tiles to PAL2[4] once and cycle CRAM so bars share the shot bank.
+ * XOR walkers stay on nibble 2 (tests forbid 4 in k_xor_cram_nib). */
+#define LIGHTBAR_CRAM_NIB  4
 #define KIND_BOX        4
 #define KIND_DUSTER     10
 #define KIND_TERUZO     12
@@ -429,6 +433,7 @@ static Slot s_fire;
 static u8  s_fire7_life_ticked;
 static u8  s_fire7_cram;        /* PAL2[13] borrowed for 72de cycle */
 static u8  s_fire7_col;         /* 72de SAT colour; INC then AND 0x8F */
+static u8  s_bar_cram_refs;     /* type 21 bars sharing PAL2[4] */
 /* 7221 BIT 7: init RET, no 4898. Set when entity_spawn_shot already ran
  * 7228-724e this frame (player_update then entity_update). */
 static u8  s_shot_init_ret[SHOT_SLOTS];
@@ -731,11 +736,14 @@ static const u8 k_frame_color[FRAME_N];
 
 /*
  * Dense KIND_SHOT / KIND_FIRE / KIND_EBULLET: same SAT name + nibble
- * every lifetime (leads 0x8F, player shots 0x8F, fire after 72de bind).
- * Each spr_place used to AUTO_VRAM + DMA 32-128 B. A 7-frag umber burst
- * was ~900 B plus 7 tile-allocator hits in one tick. Bank the first
- * upload and retarget later sprites at that index (no DMA, no AUTO).
- * Type 21 R-walk without CRAM is not cached (would fill 16 nibbles).
+ * every lifetime (leads 0x8F, player shots 0x8F, fire after 72de bind,
+ * type 21 after LIGHTBAR_CRAM_NIB bind). Each spr_place used to AUTO_VRAM
+ * + DMA 32-128 B. A 7-frag umber burst was ~900 B plus 7 tile-allocator
+ * hits in one tick. Bank the first upload and SPR_setVRAMTileIndex later
+ * sprites at that index (no DMA). Filipe's SGDK 2.11 has no public
+ * VDP_allocateTiles / VDP_releaseTiles; sprite_eng uses AUTO_VRAM_ALLOC
+ * and SPR_setVRAMTileIndex (which VRAM_free's the unused AUTO slot).
+ * Type 21 8659 is CRAM on PAL2[4], so bars share one bank key.
  */
 #define SHOT_BANK_N  12
 typedef struct {
@@ -776,14 +784,11 @@ static u8 proj_tile_want(const Slot *s)
 
 static int shot_vram_cacheable(const Slot *s, u8 want)
 {
-    if (!shot_art_shareable(s))
-        return 0;
-    /* Type 21 8659 walks R every armed tick. Shared CRAM is one nibble;
-     * the remap fallback must not bank 16 keys. */
-    if (s->kind == KIND_EBULLET && s->variant == 21 && !s->cram_nib)
-        return 0;
+    /* All shots/fire/ebullets, including type 21 light bars. Colour-only
+     * walks bind CRAM (LIGHTBAR_CRAM_NIB / XOR nibble) so the bank key
+     * stays one (frame, nibble), not 16 R-walk keys. */
     (void)want;
-    return 1;
+    return shot_art_shareable(s);
 }
 
 static int shot_bank_lookup(u8 frame, u8 nib, u16 *out)
@@ -802,20 +807,46 @@ static int shot_bank_lookup(u8 frame, u8 nib, u16 *out)
     return 0;
 }
 
+/* Sit on a banked index. SPR_setVRAMTileIndex(-1→manual) releases the
+ * sprite's AUTO slot via the sprite engine VRAM region (not VDP_*Tiles). */
+static void shot_vram_point(Sprite *sp, u16 idx)
+{
+    if (!sp)
+        return;
+    SPR_setVRAMTileIndex(sp, (s16)idx);
+    SPR_setAutoTileUpload(sp, FALSE);
+}
+
+/* Bank owns these tiles until SPR_reset. Do not SPR_setVRAMTileIndex:
+ * that VRAM_frees the slot other leads still read. */
+static void shot_vram_keep_banked(Sprite *sp)
+{
+    if (!sp)
+        return;
+    sp->status &= (u16)~SPR_FLAG_AUTO_VRAM_ALLOC;
+    SPR_setAutoTileUpload(sp, FALSE);
+}
+
+/* Type 45 bar↔med: sprite has no AUTO slot after remember(). Re-enable
+ * AUTO so DMA lands in a fresh index, not the previous frame's bank. */
+static int shot_vram_fresh_auto(Sprite *sp)
+{
+    if (!sp)
+        return 0;
+    if (sp->status & SPR_FLAG_AUTO_VRAM_ALLOC)
+        return 1;
+    if (!SPR_setVRAMTileIndex(sp, -1))
+        return 0;
+    SPR_setAutoTileUpload(sp, FALSE);
+    return 1;
+}
+
 static void shot_vram_reset(void)
 {
-    u8 i;
-
-    for (i = 0; i < SHOT_BANK_N; i++)
-    {
-        if (s_shot_bank[i].used && s_shot_bank[i].ntiles)
-            VDP_releaseTiles(s_shot_bank[i].index, s_shot_bank[i].ntiles);
-        s_shot_bank[i].used = 0;
-        s_shot_bank[i].frame = 0;
-        s_shot_bank[i].nib = 0;
-        s_shot_bank[i].ntiles = 0;
-        s_shot_bank[i].index = 0;
-    }
+    /* SPR_reset (game_boot / go_title) rebuilds the sprite VRAM region.
+     * Banked sprites already dropped AUTO so SPR_releaseSprite did not
+     * VRAM_free; do not invent VDP_releaseTiles. */
+    memset(s_shot_bank, 0, sizeof(s_shot_bank));
 }
 
 static void shot_vram_remember(Slot *s, u8 want, u8 ntiles)
@@ -828,12 +859,7 @@ static void shot_vram_remember(Slot *s, u8 want, u8 ntiles)
     idx = (u16)(s->spr->attribut & TILE_INDEX_MASK);
     if (shot_bank_lookup(s->frame, want, &idx))
     {
-        u16 mine = (u16)(s->spr->attribut & TILE_INDEX_MASK);
-
-        if (mine != idx && (s->spr->status & SPR_FLAG_AUTO_VRAM_ALLOC))
-            VDP_releaseTiles(mine, ntiles);
-        s->spr->attribut = (u16)((s->spr->attribut & ~TILE_INDEX_MASK) | idx);
-        s->spr->status &= (u16)~SPR_FLAG_AUTO_VRAM_ALLOC;
+        shot_vram_point(s->spr, idx);
         return;
     }
     for (i = 0; i < SHOT_BANK_N; i++)
@@ -845,9 +871,7 @@ static void shot_vram_remember(Slot *s, u8 want, u8 ntiles)
         s_shot_bank[i].nib = want;
         s_shot_bank[i].ntiles = ntiles;
         s_shot_bank[i].index = (u16)(s->spr->attribut & TILE_INDEX_MASK);
-        /* Bank owns the tiles for the session. SPR_releaseSprite must
-         * not return them while other leads still point here. */
-        s->spr->status &= (u16)~SPR_FLAG_AUTO_VRAM_ALLOC;
+        shot_vram_keep_banked(s->spr);
         return;
     }
 }
@@ -861,8 +885,7 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
         return 0;
     if (shot_bank_lookup(s->frame, want, &idx))
     {
-        s->spr->attribut = (u16)((s->spr->attribut & ~TILE_INDEX_MASK) | idx);
-        s->spr->status &= (u16)~SPR_FLAG_AUTO_VRAM_ALLOC;
+        shot_vram_point(s->spr, idx);
         s->vram_fr = s->frame;
         s->vram_nib = want;
         return 1;
@@ -873,12 +896,8 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
      * (type 45 bar/med) must not DMA into the previous frame's tiles. */
     if (!(s->spr->status & SPR_FLAG_AUTO_VRAM_ALLOC) && ntiles)
     {
-        s16 fresh = VDP_allocateTiles(ntiles);
-
-        if (fresh < 0)
+        if (!shot_vram_fresh_auto(s->spr))
             return 1;
-        s->spr->attribut = (u16)((s->spr->attribut & ~TILE_INDEX_MASK)
-                                 | (u16)fresh);
     }
     return 0;
 }
@@ -1755,17 +1774,9 @@ static void spr_place(Slot *s, u16 frame)
             SPR_setAnimAndFrame(s->spr, 0, frame);
             if (share)
             {
-                /* Same addSprite flags as flyers. Drop the unused AUTO
-                 * slot and sit on the banked lead/shot tiles. */
-                if (s->spr->frame && s->spr->frame->tileset
-                    && s->spr->frame->tileset->numTile)
-                    VDP_releaseTiles(
-                        (u16)(s->spr->attribut & TILE_INDEX_MASK),
-                        s->spr->frame->tileset->numTile);
-                s->spr->attribut = (u16)((s->spr->attribut & ~TILE_INDEX_MASK)
-                                         | bank_idx);
-                s->spr->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
-                s->spr->status &= (u16)~SPR_FLAG_AUTO_VRAM_ALLOC;
+                /* Same addSprite flags as flyers. SPR_setVRAMTileIndex
+                 * drops the unused AUTO slot and sits on the bank. */
+                shot_vram_point(s->spr, bank_idx);
                 s->vram_fr = (u8)frame;
                 s->vram_nib = want;
             }
@@ -6956,12 +6967,25 @@ static void xor_cram_reset_all(void)
 {
     s_xor_cram_kind = 0;
     s_xor_cram_refs = 0;
+    s_bar_cram_refs = 0;
 }
 
 static void xor_cram_release(Slot *s)
 {
     if (!s->cram_nib)
         return;
+    if (s->cram_nib == LIGHTBAR_CRAM_NIB
+        && s->kind == KIND_EBULLET && s->variant == 21)
+    {
+        if (s_bar_cram_refs)
+            s_bar_cram_refs--;
+        if (!s_bar_cram_refs)
+            PAL_setColor((u16)((PAL2 * 16) + LIGHTBAR_CRAM_NIB),
+                         k_tms_vdp[LIGHTBAR_CRAM_NIB]);
+        s->cram_nib = 0;
+        s->cram_col = 0;
+        return;
+    }
     if (s_xor_cram_refs)
         s_xor_cram_refs--;
     if (!s_xor_cram_refs)
@@ -6980,6 +7004,14 @@ static u8 xor_cram_alloc(const Slot *s)
 
     if (!k)
         return 0;
+    /* Type 21 always binds PAL2[4] (baked FRAME_LIGHT_BAR). Do not sit
+     * in the XOR walker pool — nibble 2 is exclusive-per-kind and would
+     * miss when SIG/FLASH already owns it, falling back to 16-key remap. */
+    if (s->kind == KIND_EBULLET && s->variant == 21)
+    {
+        s_bar_cram_refs++;
+        return LIGHTBAR_CRAM_NIB;
+    }
     if (s_xor_cram_kind && s_xor_cram_kind != k)
         return 0;
     s_xor_cram_kind = k;
@@ -6988,7 +7020,8 @@ static u8 xor_cram_alloc(const Slot *s)
 }
 
 /* Non-fire tiles must not sit on PAL2[13]: fire 0/1/2/7 72de owns it.
- * Type 67 840a and type 61 8eaf[7] are 0x8D (magenta) — alias to 12. */
+ * Type 67 840a and type 61 8eaf[7] are 0x8D (magenta) — alias to 12.
+ * Type 21 8659 owns PAL2[4] (FRAME_LIGHT_BAR bake). Other 0x84 sit on 12. */
 static u8 sat_col_tile_nibble(const Slot *s, u8 want)
 {
     if (s->cram_nib)
@@ -6999,6 +7032,9 @@ static u8 sat_col_tile_nibble(const Slot *s, u8 want)
                      k_tms_vdp[13]);
         return NIB_8D_ALIAS;
     }
+    if (want == LIGHTBAR_CRAM_NIB
+        && !(s->kind == KIND_EBULLET && s->variant == 21))
+        return NIB_8D_ALIAS;
     return want;
 }
 
@@ -7064,7 +7100,28 @@ static int xor_cram_bind(Slot *s, u8 col)
 {
     u8 nib;
 
-    if (!xor_cram_wanted(s) || !s->spr || !s->spr->frame)
+    if (!xor_cram_wanted(s))
+        return 0;
+    /* Type 21 8659 must CRAM even while the hardware sprite is deferred
+     * (letterbox). Later spr_place reads cram_nib so bars bank on nibble 4
+     * instead of 16 R-walk keys. */
+    if (s->kind == KIND_EBULLET && s->variant == 21)
+    {
+        if (!s->cram_nib)
+            nib = xor_cram_alloc(s);
+        else
+            nib = LIGHTBAR_CRAM_NIB;
+        if (!nib)
+            return 0;
+        s->cram_nib = nib;
+        s->cram_col = col;
+        s->sat_col = col;
+        if (s->spr && s->spr->frame)
+            xor_cram_paint(s, nib);
+        PAL_setColor((u16)((PAL2 * 16) + nib), k_tms_vdp[col & 0x0F]);
+        return 1;
+    }
+    if (!s->spr || !s->spr->frame)
         return 0;
     nib = xor_cram_alloc(s);
     if (!nib)
@@ -7096,7 +7153,7 @@ void entity_init(void)
     orb_cache_reset();
     remap_cache_reset();
     xor_cram_reset_all();
-    /* SPR_reset already ran; bank indices are stale. Do not VDP_release. */
+    /* SPR_reset already ran; bank indices are stale. */
     memset(s_shot_bank, 0, sizeof(s_shot_bank));
     s_rng = 0xA351;
     s_spawn_ctrl = 0x02;          /* stream active */
