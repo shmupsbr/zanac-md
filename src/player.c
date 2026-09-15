@@ -178,23 +178,24 @@ static void show_ship(int vis)
         if (dy < y0 || dy + SHIP_H > y1)
             vis = 0;
     }
-    SPR_setVisibility(s_spr, vis ? VISIBLE : HIDDEN);
-    if (s_cspr)
-        SPR_setVisibility(s_cspr, vis ? VISIBLE : HIDDEN);
+    /* Depth is bound once in player_init. Re-binding every tick
+     * immediately sortSprite-inserts the hull (Y-sort thrash). */
     if (vis)
     {
+        if (s_spr->visibility != (u16)0xFFFF)
+            SPR_setVisibility(s_spr, VISIBLE);
+        if (s_cspr && s_cspr->visibility != (u16)0xFFFF)
+            SPR_setVisibility(s_cspr, VISIBLE);
         SPR_setPosition(s_spr, dx, dy);
-        SPR_setPriority(s_spr, FALSE);
-        s_spr->status &= (u16)~SPR_FLAG_AUTO_DEPTH;
-        SPR_setDepth(s_spr, 0);
         if (s_cspr)
-        {
             SPR_setPosition(s_cspr, cx, cdy);
-            SPR_setPriority(s_cspr, FALSE);
-            s_cspr->status &= (u16)~SPR_FLAG_AUTO_DEPTH;
-            /* 0x772F appends after 4898; later SAT is behind. */
-            SPR_setDepth(s_cspr, 1);
-        }
+    }
+    else
+    {
+        if (s_spr->visibility)
+            SPR_setVisibility(s_spr, HIDDEN);
+        if (s_cspr && s_cspr->visibility)
+            SPR_setVisibility(s_cspr, HIDDEN);
     }
 }
 

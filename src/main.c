@@ -46,6 +46,14 @@ int main(bool hardReset)
         else
             game_update();
 
+        /* One tick = one GINT. Do not wait before SPR_update (that
+         * would hide DMA prep in a second retrace) and do not flush
+         * before the wait (autoflush-on / mid-frame flush = 30 Hz).
+         * Remaining worst-case (hardware, not a second wait):
+         *  20 sprites/line MD SAT flicker; type 67/45 SAT-name walk
+         *  still DMA 128 B/tick (shape change, not colour); kinds
+         *  that miss the shared XOR CRAM nibble defer colour DMA
+         *  when the queue is >=4096 B. Sim never skips a vblank. */
         SPR_update();
         SYS_doVBlankProcess();  /* one wait_one_frame 0x4306 */
         DMA_flushQueue();       /* flush in THAT vblank; never before */

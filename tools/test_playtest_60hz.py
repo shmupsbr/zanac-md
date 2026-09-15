@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """NTSC MSX v1 is 60 logic ticks/sec. Do not cap the MD port at 30fps.
 
+Cloud has no SGDK / VDP runtime -- this file is a static guard, not a
+measured FPS meter. Do not treat a pass as "60 fps observed on hardware."
+
 zanac.asm:
   vblank_isr 0x43DA increments E1F8 every VDP GINT.
   wait_one_frame 0x4306: spin until (E1F8)>=1, then zero it -- ONE retrace.
@@ -116,8 +119,37 @@ def main() -> int:
         return fail("XOR leftovers (36/56/59/67/walkers) must CRAM-bind like fire 7")
     if "k_xor_cram_nib" not in ent:
         return fail("XOR CRAM must use dedicated PAL2 nibbles, not 2/3/13")
+    if "s_xor_cram_kind" not in ent or "s_xor_cram_refs" not in ent:
+        return fail("XOR CRAM must be shared by kind (not exclusive-per-sprite)")
+    if "dma_nibble_defer" not in ent or "DMA_NIBBLE_SOFT_CAP" not in ent:
+        return fail("nibble-only tile DMA must defer when the queue is hot")
+    if "DMA_getQueueTransferSize" not in ent:
+        return fail("defer uses DMA_getQueueTransferSize (bytes already queued)")
+    if re.search(r"DMA_NIBBLE_SOFT_CAP\s+4096", ent) is None:
+        return fail("soft cap must stay 4096 (leave ~3KB of NTSC vblank for SAT/NT)")
+
+    # Depth bind is place-only; spr_sync must not sortSprite every tick.
+    sync = re.search(r"static void spr_sync\(Slot \*s\)\s*\{(.*?)^\}", ent, re.S | re.M)
+    if not sync:
+        return fail("spr_sync not found")
+    if "sat_bind_depth" in sync.group(1):
+        return fail("spr_sync must not sat_bind_depth (SGDK 2.11 sortSprite)")
+    if "sat_depth_ok" not in ent:
+        return fail("SAT depth must be cached after the first slot walk")
+
+    ply = (ROOT / "src" / "player.c").read_text(encoding="utf-8")
+    show = re.search(r"static void show_ship\(int vis\)\s*\{(.*?)^\}", ply, re.S | re.M)
+    if not show:
+        return fail("show_ship not found")
+    if "SPR_setDepth(" in show.group(1):
+        return fail("show_ship must not SPR_setDepth every tick")
+    if ply.count("SYS_doVBlankProcess()") != 0:
+        return fail("player.c must not add a second VBlank wait")
+    if "DMA_setAutoFlush(TRUE)" in ent or "DMA_setAutoFlush(TRUE)" in game_c:
+        return fail("do not re-enable DMA autoflush outside main.c")
 
     print("ok: SPR_update; doVBlank; flush; DMA budget raised; no 30fps cap")
+    print("ok: shared XOR CRAM; nibble DMA defer; depth bind at place only")
     return 0
 
 

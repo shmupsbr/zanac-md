@@ -417,6 +417,8 @@ typedef struct {
     u8  mframe;     /* FRAME_* for mspr; 0 if occupancy-only / none */
     u8  cram_nib;   /* PAL2 index after XOR/72de bind; 0 = remap path */
     u8  cram_col;   /* logical SAT colour while tiles stay on cram_nib */
+    u8  sat_depth;  /* SGDK depth; 71f6 marker is this+1 */
+    u8  sat_depth_ok; /* 1 after first slot-index lookup (not per sync) */
 } Slot;
 
 static Slot s_shot[SHOT_SLOTS];
@@ -605,8 +607,8 @@ static int  xor_cram_bind(Slot *s, u8 col);
 static void xor_cram_cycle(Slot *s, u8 col);
 static void xor_cram_paint(Slot *s, u8 nib);
 static u8   sat_col_tile_nibble(const Slot *s, u8 want);
-static s16 sat_depth_primary(const Slot *s);
-static s16 sat_depth_marker(const Slot *s);
+static s16 sat_depth_primary(Slot *s);
+static s16 sat_depth_marker(Slot *s);
 static void riser_dma_sgt(Slot *s);
 
 /*
@@ -634,31 +636,55 @@ static void sat_bind_depth(Sprite *sp, s16 depth)
 {
     if (!sp)
         return;
-    /* SPR_update reapplies Y if this flag stays set. */
+    /* SGDK 2.11: 0x0200 is AUTO_VISIBILITY (no AUTO_DEPTH). Clearing
+     * it still stops SPR_update from Y-sorting via auto vis. Depth
+     * sort is immediate in SPR_setDepth -- skip the call when the
+     * value is already set so a busy SAT does not re-insert. */
     sp->status &= (u16)~SPR_FLAG_AUTO_DEPTH;
-    SPR_setDepth(sp, depth);
+    if (sp->depth != depth)
+        SPR_setDepth(sp, depth);
 }
 
-static s16 sat_depth_primary(const Slot *s)
+static s16 sat_depth_primary(Slot *s)
 {
     u8 i;
+    s16 d;
 
+    /* One 28-slot walk per sprite lifetime. spr_sync used to search
+     * shots then enemies on every live sprite every tick (~50 walks). */
+    if (s->sat_depth_ok)
+        return (s16)s->sat_depth;
     if (s == &s_fire)
-        return SAT_DEPTH_FIRE;
-    for (i = 0; i < SHOT_SLOTS; i++)
+        d = SAT_DEPTH_FIRE;
+    else
     {
-        if (s == &s_shot[i])
-            return (s16)(SAT_DEPTH_SHOT + i);
+        d = (s16)(SAT_DEPTH_ENEMY + (s16)ENEMY_SLOTS * 2);
+        for (i = 0; i < SHOT_SLOTS; i++)
+        {
+            if (s == &s_shot[i])
+            {
+                d = (s16)(SAT_DEPTH_SHOT + i);
+                break;
+            }
+        }
+        if (d == (s16)(SAT_DEPTH_ENEMY + (s16)ENEMY_SLOTS * 2))
+        {
+            for (i = 0; i < ENEMY_SLOTS; i++)
+            {
+                if (s == &s_en[i])
+                {
+                    d = (s16)(SAT_DEPTH_ENEMY + (s16)i * 2);
+                    break;
+                }
+            }
+        }
     }
-    for (i = 0; i < ENEMY_SLOTS; i++)
-    {
-        if (s == &s_en[i])
-            return (s16)(SAT_DEPTH_ENEMY + (s16)i * 2);
-    }
-    return (s16)(SAT_DEPTH_ENEMY + (s16)ENEMY_SLOTS * 2);
+    s->sat_depth = (u8)d;
+    s->sat_depth_ok = 1;
+    return d;
 }
 
-static s16 sat_depth_marker(const Slot *s)
+static s16 sat_depth_marker(Slot *s)
 {
     /* 71f6 writes after the primary SAT; later index is behind. */
     return (s16)(sat_depth_primary(s) + 1);
@@ -684,6 +710,15 @@ static void spr_vis_playfield(Sprite *sp, s16 dx, s16 dy, int want_vis)
         if (mode_hud_overlap(dx, MODE_SPR_W))
             want_vis = 0;
     }
+    /* SGDK 2.11 SPR_setVisibility always writes the field. Skip the
+     * call when the sprite is already in the requested state. */
+    if (want_vis)
+    {
+        if (sp->visibility == (u16)0xFFFF)
+            return;
+    }
+    else if (sp->visibility == 0)
+        return;
     SPR_setVisibility(sp, want_vis ? VISIBLE : HIDDEN);
 }
 
@@ -718,8 +753,11 @@ static void spr_sync(Slot *s)
     dy = slot_draw_y(s);
     if (s->spr)
     {
+        /* Depth is bound at spr_place / marker_place. Re-binding
+         * every sync immediately sortSprite-inserts (Y-sort thrash).
+         * SGDK 2.11 set-position already no-ops when x+0x80/y+0x80
+         * match. */
         SPR_setPosition(s->spr, dx, dy);
-        sat_bind_depth(s->spr, sat_depth_primary(s));
         spr_vis_playfield(s->spr, dx, dy, 1);
     }
     /* 71f6: SAT Y = parentY-0x11, X = parent X, color 0x81. Same SUB as
@@ -736,9 +774,6 @@ static void spr_sync(Slot *s)
     mdx = dx;
     mdy = dy;
     SPR_setPosition(s->mspr, mdx, mdy);
-    sat_bind_depth(s->mspr, sat_depth_marker(s));
-    if (s->spr)
-        sat_bind_depth(s->spr, sat_depth_primary(s));
     /* 71f6 always writes the complement SAT. Clip only this EC sprite's
      * own draw box. Do not hide it because the primary overlaps the HUD
      * or because a port line-budget is full -- that left colored halves. */
@@ -1285,6 +1320,17 @@ static const u8 *orb_cache_get(u8 sat, const u8 *jp, u8 want)
     return (const u8 *)s_orb_cache[i];
 }
 
+/* NTSC vblank ~7200 bytes (H40). SAT (~80*8) + one NT row + new-frame
+ * tiles must flush in this vblank. Colour-only remaps that missed CRAM
+ * are deferred when the queue is already fat -- sim still ticks; the
+ * nibble lags. Do not defer SAT-name / frame changes. */
+#define DMA_NIBBLE_SOFT_CAP  4096
+
+static int dma_nibble_defer(void)
+{
+    return DMA_getQueueTransferSize() >= DMA_NIBBLE_SOFT_CAP;
+}
+
 /* Type 72 and 84d1/86F3 discs: 4-tile Japan pat. Cache key is SAT
  * name + nibble (FRAME_CIRCLE vehicle; 8a16 / 84d1 SAT 1C/20/24). */
 static int orb_upload_japan(Slot *s, u8 want)
@@ -1299,6 +1345,10 @@ static int orb_upload_japan(Slot *s, u8 want)
     if (!jp || !s->spr)
         return 0;
     if (s->vram_fr == s->sat && s->vram_nib == want)
+        return 1;
+    /* Same SAT name, only nibble walked: keep last tiles if the queue
+     * is already over the soft cap (explode_airborne 24 discs). */
+    if (s->vram_fr == s->sat && dma_nibble_defer())
         return 1;
 
     vaddr = (u16)((s->spr->attribut & TILE_INDEX_MASK) * 32);
@@ -1361,6 +1411,11 @@ static void spr_upload_color(Slot *s)
 
     /* Same frame + same nibble: vis/XOR-high-nibble blinks must not DMA. */
     if (s->vram_fr == s->frame && s->vram_nib == want)
+        return;
+    /* Same art, only sat_col nibble changed. Defer when the queue is
+     * already holding SAT-name tiles / NT / first-bind CRAM paint.
+     * Next cool frame uploads the pending nibble. */
+    if (s->vram_fr == s->frame && dma_nibble_defer())
         return;
 
     nbytes = (u16)(ts->numTile * 32);
@@ -1468,6 +1523,7 @@ static void spr_place(Slot *s, u16 frame)
             SPR_setPriority(s->spr, FALSE);
             SPR_setAnimAndFrame(s->spr, 0, frame);
             spr_upload_color(s);
+            sat_bind_depth(s->spr, sat_depth_primary(s));
             spr_sync(s);
         }
     }
@@ -1497,6 +1553,7 @@ static void spr_place(Slot *s, u16 frame)
             xor_cram_paint(s, s->cram_nib);
         else
             spr_upload_color(s);
+        sat_bind_depth(s->spr, sat_depth_primary(s));
         spr_sync(s);
     }
 }
@@ -3401,6 +3458,7 @@ static void riser_ensure_spr(Slot *e)
     SPR_setAnimAndFrame(e->spr, 0, FRAME_BOX);
     e->sat = 0;
     e->spr->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
+    sat_bind_depth(e->spr, sat_depth_primary(e));
 }
 
 static void become_riser(Slot *e)
@@ -6554,46 +6612,47 @@ static void fire7_cycle_cram(Slot *f)
 #define XOR_CRAM_N      1
 static const u8 k_xor_cram_nib[XOR_CRAM_N] = { 2 };
 #define NIB_8D_ALIAS    12
-static u8 s_xor_cram_used[XOR_CRAM_N];
+/* Exclusive-per-sprite left N-1 XOR enemies on remap+DMA every tick
+ * (24 SIG = ~3 KB). Share the one safe nibble (2 -- not 4/5/6/13)
+ * among all walkers of the same kind. Last PAL_setColor that frame
+ * wins, so a crowd flashes in sync (draw-only). Other kinds miss
+ * the pool and hit remap_cache + dma_nibble_defer. */
+static u8 s_xor_cram_kind;  /* 0 = free; else Slot.kind of the owner */
+static u8 s_xor_cram_refs;
 
 static void xor_cram_reset_all(void)
 {
-    memset(s_xor_cram_used, 0, sizeof(s_xor_cram_used));
+    s_xor_cram_kind = 0;
+    s_xor_cram_refs = 0;
 }
 
 static void xor_cram_release(Slot *s)
 {
-    u8 i;
-
     if (!s->cram_nib)
         return;
-    for (i = 0; i < XOR_CRAM_N; i++)
+    if (s_xor_cram_refs)
+        s_xor_cram_refs--;
+    if (!s_xor_cram_refs)
     {
-        if (k_xor_cram_nib[i] == s->cram_nib && s_xor_cram_used[i])
-        {
-            s_xor_cram_used[i] = 0;
-            PAL_setColor((u16)((PAL2 * 16) + s->cram_nib),
-                         k_tms_vdp[s->cram_nib]);
-            break;
-        }
+        PAL_setColor((u16)((PAL2 * 16) + s->cram_nib),
+                     k_tms_vdp[s->cram_nib]);
+        s_xor_cram_kind = 0;
     }
     s->cram_nib = 0;
     s->cram_col = 0;
 }
 
-static u8 xor_cram_alloc(void)
+static u8 xor_cram_alloc(const Slot *s)
 {
-    u8 i;
+    u8 k = s->kind;
 
-    for (i = 0; i < XOR_CRAM_N; i++)
-    {
-        if (!s_xor_cram_used[i])
-        {
-            s_xor_cram_used[i] = 1;
-            return k_xor_cram_nib[i];
-        }
-    }
-    return 0;
+    if (!k)
+        return 0;
+    if (s_xor_cram_kind && s_xor_cram_kind != k)
+        return 0;
+    s_xor_cram_kind = k;
+    s_xor_cram_refs++;
+    return k_xor_cram_nib[0];
 }
 
 /* Non-fire tiles must not sit on PAL2[13]: fire 0/1/2/7 72de owns it.
@@ -6672,7 +6731,7 @@ static int xor_cram_bind(Slot *s, u8 col)
 
     if (!xor_cram_wanted(s) || !s->spr || !s->spr->frame)
         return 0;
-    nib = xor_cram_alloc();
+    nib = xor_cram_alloc(s);
     if (!nib)
         return 0;
     s->cram_nib = nib;
