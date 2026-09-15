@@ -101,8 +101,8 @@ def main() -> int:
     high_at = apply.find("options_bullet_high")
     if light_at < 0 or high_at < 0 or light_at > high_at:
         return fail("type 21 8659 must run before the vis-gated 0x8F/HIGH pair")
-    if apply[light_at:high_at].count("0x80") < 1:
-        return fail("type 21 arm must 8659 R-nibble|0x80")
+    if apply[light_at:high_at].count("ebullet_8659") < 1:
+        return fail("type 21 arm must 8659")
     print("  apply_vis: type 21 8659 always, then vis-gated discs/45")
 
     if "FRAME_LIGHT_BAR 21" in opth and "does not enter" not in opth:

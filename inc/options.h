@@ -75,17 +75,17 @@
  * Easy / Normal / Hard must never change bolinha colour. The only
  * switch is this option, for every enemy and every boss, whole game:
  *   NORMAL (default) = Japan white (0x8F / nibble 15), no 8659.
- *   HIGH = #136 PAL2[4] 8659 colour-walk on the same shots.
+ *   HIGH = 8659 colour-walk on the same shots (PAL2[TYPE21_CRAM_NIB]).
  * Scope: FRAME_LEAD discs 20/37/38/41/42/43, type 45 bar/med pulse,
  * k_gun type-38 children, box-4 3x38 volleys, edge spawners,
  * type-73..79 FRAME_LEAD / type-45 fire. Type 21 FRAME_LIGHT_BAR
  * (`<===>`) is Japan 8659 always — it does not enter this switch.
- * SGDK-packed FRAME_LEAD nibble 4 must not sit on PAL2[4] when
- * NORMAL (type 21's always-on 8659 walks that CRAM slot). Share a
- * (FRAME_LEAD,15) bank only after paint_all rewrote every body
- * nibble to 15; never skip while the bank still holds packed 4.
- * #144 own-after-place / reuse lock stays; do not DMA paint_all-15
- * every tick (that is the 3+ white-bolinha slowdown).
+ * Type 21 CRAM is a dedicated nibble, not SGDK-packed FRAME_LEAD 4
+ * and not white 15: #146 still walked PAL2[4] while discs sat on
+ * packed 4 (leave_white keyed the wrong frame on slot reuse).
+ * NORMAL never shares FRAME_LEAD with any bank type 21 can touch.
+ * DMA white discs from a RAM paint_all-15 cache (one blit, not a
+ * per-pixel rebuild). Share that proven bank; no per-tick rebuild.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1

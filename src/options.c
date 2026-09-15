@@ -86,6 +86,8 @@ u8 options_bullet_vis(void)
 
 u8 options_bullet_high(void)
 {
+    /* Menu NORMAL (0, default) is false. Skill / game_start never
+     * write s_bullet_vis; only options_nudge_bullet_vis does. */
     return (u8)(options_bullet_vis() == BULLET_VIS_HIGH);
 }
 

@@ -204,7 +204,10 @@ def main() -> int:
     apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)") or ""
     if "options_bullet_high" not in apply:
         return fail("apply_vis must read BULLET VISIBILITY")
-    if "0x80|(rnd()&0x0F)" not in apply.replace(" ", ""):
+    if "ebullet_8659" not in apply:
+        return fail("HIGH must still 8659-walk")
+    walk = fn_span(ent, "static void ebullet_8659(Slot *e)") or ""
+    if "0x80|(rnd()&0x0F)" not in walk.replace(" ", ""):
         return fail("HIGH must still 8659-walk")
     if "spr_set_sat_col(e, 0x8F)" not in apply:
         return fail("NORMAL must request 0x8F")

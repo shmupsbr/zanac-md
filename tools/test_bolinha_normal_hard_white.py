@@ -203,8 +203,11 @@ def main() -> int:
     print("  ground guns: type 21/38 via spawn_frag")
 
     apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)") or ""
-    if "0x80|(rnd()&0x0F)" not in apply.replace(" ", ""):
-        return fail("HIGH must still 8659-walk inside apply_vis")
+    if "ebullet_8659" not in apply:
+        return fail("HIGH must still 8659-walk via ebullet_8659")
+    walk = fn_span(ent, "static void ebullet_8659(Slot *e)") or ""
+    if "0x80|(rnd()&0x0F)" not in walk.replace(" ", ""):
+        return fail("HIGH must still 8659-walk")
     if "spr_set_sat_col(e, 0x8F)" not in apply:
         return fail("NORMAL apply_vis must request 0x8F (choke enforces it)")
     print("  apply_vis: HIGH 8659 / NORMAL 0x8F")
