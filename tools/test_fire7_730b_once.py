@@ -336,7 +336,7 @@ def main() -> int:
         print("  KEEP: type 64 8279 re-roll")
 
     if not re.search(
-        r"e->variant == 21\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
+        r"e->variant == 21(?:\s*&&\s*options_bullet_high\(\))?\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
     ):

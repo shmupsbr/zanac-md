@@ -128,19 +128,19 @@ def main() -> int:
 
     # Active 8659 lives in the shared 21/37/38/42/43/45 8.8 step.
     if not re.search(
-        r"e->variant == 21\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
+        r"e->variant == 21\s*&&\s*options_bullet_high\(\)\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
     ):
-        fail("type 21 active must 8659 R-nibble|0x80 via spr_set_sat_col")
+        fail("type 21 8659 must gate on BULLET VISIBILITY (Easy k_gun cannot bypass)")
         fails += 1
     else:
-        print("  update: type 21 8659 R-nibble|0x80")
+        print("  update: type 21 8659 R-nibble|0x80 on HIGH vis")
 
     # 8659 must run before 4898 (MSX order), still inside the 21-group.
     step = re.search(
         r"e->variant == 21 \|\| e->variant == 37.*?"
-        r"if \(e->variant == 21\)\s*\n\s*spr_set_sat_col.*?"
+        r"if \(e->variant == 21 && options_bullet_high\(\)\)\s*\n\s*spr_set_sat_col.*?"
         r"if \(step_88_4898\(e\)\)",
         ent,
         re.S,

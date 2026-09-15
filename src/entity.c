@@ -357,9 +357,10 @@
  * (not skill / ALC) owns the colour: NORMAL keeps that white lock on
  * every skill; HIGH restores the #136 PAL2[4] walk on those discs
  * only, including type 20/41 which have their own update arms.
- * Type 21 FRAME_LIGHT_BAR still 8659-walks. Type 45 stays 0x8F
- * size-pulse. XOR walkers stay on nibble 2 (tests forbid 4 in
- * k_xor_cram_nib). */
+ * Type 21 FRAME_LIGHT_BAR is the Easy-rank gun/base "tiro" (#138
+ * left it always-on 8659, so Easy+NORMAL still cycled). Same vis
+ * gate: NORMAL white+EC, HIGH 8659. Type 45 stays 0x8F size-pulse.
+ * XOR walkers stay on nibble 2 (tests forbid 4 in k_xor_cram_nib). */
 #define LIGHTBAR_CRAM_NIB  4
 #define KIND_BOX        4
 #define KIND_DUSTER     10
@@ -794,14 +795,22 @@ static int ebullet_lead_high(const Slot *s)
     return ebullet_lead_disc(s) && options_bullet_high();
 }
 
-/* Type 21 bar owns PAL2[4] CRAM (8659 walk, one bank key).
+/* Type 21 bar owns PAL2[4] CRAM (8659 walk, one bank key) only on
+ * HIGH vis. Easy k_gun 48/49/52-55 and type-73 base_fire spawn this
+ * bar; #138 left 8659 always-on so Easy+NORMAL still colour-cycled.
+ * Skill / ALC never enter: same helper family as ebullet_lead_high.
  * Lead discs: HIGH vis (any skill) shares that nibble; NORMAL stays
  * baked 15. */
+static int ebullet_type21(const Slot *s)
+{
+    return (s->kind == KIND_EBULLET && (u8)(s->variant & 0x7F) == 21);
+}
+
 static int ebullet_cram_shot(const Slot *s)
 {
     if (ebullet_lead_high(s))
         return 1;
-    return (s->kind == KIND_EBULLET && s->variant == 21);
+    return ebullet_type21(s) && options_bullet_high();
 }
 
 static u8 proj_tile_want(const Slot *s)
@@ -809,13 +818,13 @@ static u8 proj_tile_want(const Slot *s)
     u8 baked;
     u8 want;
 
-    /* Type 21 keys the bank on PAL2[4] even before xor_cram_bind.
-     * Leftover sat_col 0x8F (previous lead) would otherwise bank
-     * (LIGHT_BAR, 15) and leave 8659 cycling an unused CRAM slot.
-     * Lead discs always bank on baked 15 (TMS white). */
+    /* Type 21 keys the bank on PAL2[4] even before xor_cram_bind
+     * when HIGH. Leftover sat_col 0x8F (previous lead) would otherwise
+     * bank (LIGHT_BAR, 15) and leave 8659 cycling an unused CRAM slot.
+     * NORMAL type 21 and lead discs bank on baked 15 (TMS white). */
     if (ebullet_cram_shot(s))
         return LIGHTBAR_CRAM_NIB;
-    if (ebullet_lead_disc(s))
+    if (ebullet_lead_disc(s) || ebullet_type21(s))
         return 15;
     if (s->cram_nib)
         return s->cram_nib;
@@ -1687,7 +1696,7 @@ static void spr_upload_color(Slot *s)
      * primary+black at the same draw (Y-0x11 / same X). */
     if (ebullet_cram_shot(s))
         want = LIGHTBAR_CRAM_NIB;
-    else if (ebullet_lead_disc(s))
+    else if (ebullet_lead_disc(s) || ebullet_type21(s))
         want = 15;              /* Japan +04 0x8F / TMS white, stuck */
     else if (s->cram_nib)
         want = s->cram_nib;
@@ -1737,8 +1746,11 @@ static void spr_upload_color(Slot *s)
         /* Type 21 CRAM: paint every nonzero nibble onto PAL2[4]. A
          * want==baked verbatim upload leaves SGDK-packed index 15
          * (white) in VRAM while 8659 cycles the unused PAL2[4].
-         * Lead discs want==15==baked: verbatim white tiles. */
-        u8 paint_bar = (u8)ebullet_cram_shot(s);
+         * Lead discs: SGDK may pack baked 15 off 15 onto 4, so a
+         * verbatim DMA would share PAL2[4] with type 21 and cycle
+         * on NORMAL. paint_all onto 15 isolates the white lock. */
+        u8 paint_bar = (u8)(ebullet_cram_shot(s) || ebullet_lead_disc(s)
+                            || ebullet_type21(s));
 
         /* Verbatim tiles: queue ROM/FAR src. Skip the 128-byte copy
          * into a DMA scratch (and do not allocateAndQueue an unused buf). */
@@ -4175,9 +4187,11 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
         apply_dir_88(e, (u8)(dir & 15), speed);
     }
     e->alive = 1;
-    /* 20/37/38/41/42/43: +04=0x8F (8672/84eb/8513/8539). Type 21 init
-     * 863b does not write +04 (active 8659 is R-nibble|0x80). */
-    if (variant != 21)
+    /* 20/37/38/41/42/43: +04=0x8F (8672/84eb/8513/8539). Type 21 Japan
+     * 863b does not write +04 (active 8659 is R-nibble|0x80). NORMAL
+     * vis must still arm EC+white or the bar draws 32px right of SAT
+     * X and Easy k_gun 21 keeps colour-walking via leftover CRAM. */
+    if (variant != 21 || !options_bullet_high())
         e->sat_col = 0x8F;
     /* 21: SAT 0x18 pat 6. 45: 850b writes 0x1C then 8625 pulses 0x18/0x20. */
     spr_place(e, (variant == 21 || variant == 45) ? FRAME_LIGHT_BAR : FRAME_LEAD);
@@ -5049,16 +5063,54 @@ static void spawner_step(Slot *e)
         e->vx = (s8)(-(s8)e->vx);
 }
 
+/* 8c15 olhinho is the 8948 cell (SAT Y before 8a7d +0x10, X before
+ * 8ac7 xo/yo). Live SAT after arm is 16px south of that lens — 8ddb
+ * copies IX+01/+02 so Japan also fires from the hitbox, which on MD
+ * reads as the bottom of the nametable sprite. Undo the arm transform
+ * and sit on the lens centre. Collision stays on live SAT. */
+static void base_muzzle(const Slot *e, s16 *x, s16 *y)
+{
+    u8 idx = (u8)(e->variant - 73);
+    u8 xo;
+    u8 yo;
+    u8 cx;
+    u8 cy;
+
+    if (idx > 6)
+        idx = 0;
+    yo = k_base[idx][2];
+    xo = k_base[idx][3];
+    /* u8 like 8a7d / 8ac7. */
+    *x = (s16)(u8)((u8)e->x - xo);
+    *y = (s16)(u8)((u8)e->y - yo - 0x10);
+    /* 73/74 8c15 is 2x2 (16x16); 75-78 are one 8x8 0xBF+phase lens.
+     * Type 79 skips 8c15; same 8x8 centre on the bind cell. */
+    if (e->variant == 73 || e->variant == 74)
+    {
+        cx = 8;
+        cy = 8;
+    }
+    else
+    {
+        cx = 4;
+        cy = 4;
+    }
+    *x = (s16)(u8)((u8)*x + cx);
+    *y = (s16)(u8)((u8)*y + cy);
+}
+
 static void base_fire(Slot *e)
 {
     /* 0x8d14: A=type-0xC9 -> dispatch_inline_table. ROM words:
      * 73->8d2a, 74->8d51, 75->8d6c, 76->8d73, 77->8d93, 78->8d98, 79->8db8.
      * Aim (4c91) only for 8d98 (type 78). 73/74/76/77/79 share +0x13 cursor (vx). */
     /* 8d98 (type 78) is the only 8d14 path that aims; 42 re-aims in 84e3. */
-    u8 dir = aim_4c91(e->x, e->y);
-    /* 8ddb: IY+01/+02 = parent IX+01/+02. No +4/+8. */
-    s16 x = e->x;
-    s16 y = e->y;
+    s16 x;
+    s16 y;
+    u8 dir;
+
+    base_muzzle(e, &x, &y);
+    dir = aim_4c91(x, y);
 
     if (e->variant == 73)
     {
@@ -6314,19 +6366,21 @@ static void update_enemies(void)
              * bind=Yvel, script/timer fracs. Keep apply_dir_88.
              * u8 wrap + 4898 Y>=0xD0 / X>=0xD1 (same as luster 17/18).
              * Type 21 active 8659: LD A,R / AND 0x0F / OR 0x80 / +04 then
-             * 4898 / 44ba. Init 863b still writes no +04. spr_kill zeros
-             * sat_col; without 8659 EC never arms and the bar draws 32px
+             * 4898 / 44ba. Init 863b still writes no +04 on HIGH (Japan).
+             * NORMAL vis writes +04=0x8F at init and skips 8659 so Easy
+             * k_gun / type-73 bars stay white+EC. spr_kill zeros sat_col;
+             * without +04/8659 EC never arms and the bar draws 32px
              * right of SAT X.
              * Lead discs (37/38/42/43): Japan init +04=0x8F, no 8659.
              * Default play keeps that white lock (baked nibble 15).
              * Type 45 (0x8608): DEC clock/+0x1c before 4898; on 0: R bit0 ?
              * dir += (R&8)-4 + apply_dir_88(speed) : reload 0x28 then DEC (0x27).
              * 8625: SAT +03 = 0x18 + ((clock&1)<<3) every active frame. */
-            /* 8659 R-nibble|0x80. Type 21 Japan (always). Lead discs
-             * (37/38/42/43 here; 20/41 in their own arms) stay 0x8F
-             * in NORMAL vis on every skill; HIGH restores the #136
-             * walk. Type 45 stays 0x8F size-pulse. */
-            if (e->variant == 21)
+            /* 8659 R-nibble|0x80. Type 21 and lead discs: NORMAL white
+             * on every skill (options_bullet_high only — Easy cannot
+             * bypass); HIGH restores the #136 walk. Type 45 stays
+             * 0x8F size-pulse. */
+            if (e->variant == 21 && options_bullet_high())
                 spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
             else if (ebullet_lead_high(e))
                 spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
