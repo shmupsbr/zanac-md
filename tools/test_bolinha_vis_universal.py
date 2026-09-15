@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """BULLET VISIBILITY is the only switch for every tiro bolinha.
 
-Filipe after #138/#139 (Easy): horizontals white vs cycling mixed;
-red-box 3-volleys coloured; edge-of-screen horizontals coloured;
-boss 1 white / boss 2 coloured. Visibility must own ALL of them.
+HARD RULE: skill Easy / Normal / Hard must NEVER change bolinha colour.
+Zero relationship between SKILL LEVEL and BULLET VISIBILITY.
 
-NORMAL = solid white+EC (0x8F / nibble 15), no 8659, no PAL2[4] walk.
-HIGH   = 8659 colour-walk on the same types.
+NORMAL = solid white+EC (0x8F / nibble 15) for every enemy and every
+boss, entire game, on every skill. No 8659, no PAL2[4] walk.
+HIGH   = 8659 colour-walk on the same shots, also independent of skill.
 
-Scope (prefer over-including): FRAME_LEAD 20/37/38/41/42/43,
-FRAME_LIGHT_BAR 21, type 45 bar/med. Boxes, k_gun, spawners, wide
-84-86, base_fire 73-79. Skill / ALC never enter.
+Scope: FRAME_LEAD 20/37/38/41/42/43, FRAME_LIGHT_BAR 21, type 45
+bar/med. Boxes 3x38, k_gun, spawners, wide 84-86, base_fire 73-79.
 
 This file must FAIL if any bolinha colour-walk can run without HIGH,
-and FAIL if any forced-white bolinha path runs without NORMAL.
+FAIL if any forced-white bolinha path runs without NORMAL, and FAIL
+if skill/ALC appears in any colour helper.
 
 Usage (from zanac-md):
     python tools/test_bolinha_vis_universal.py
@@ -198,13 +198,74 @@ def main() -> int:
         return fail("init-RET visit must apply_vis (no white orphan frame)")
     print("  init-RET: apply_vis")
 
+    setc = fn_span(ent, "static void spr_set_sat_col(Slot *s, u8 col)")
+    if not setc:
+        return fail("spr_set_sat_col missing")
+    if "ebullet_bolinha" not in setc or "options_bullet_high" not in setc:
+        return fail("spr_set_sat_col must gate NORMAL bolinha every colour tick")
+    if mentions_skill(setc):
+        return fail("spr_set_sat_col must not consult skill/ALC")
+    gate = setc.split("xor_cram_cycle")[0]
+    if "xor_cram_release" not in gate or "0x8F" not in gate:
+        return fail("NORMAL bolinha must xor_cram_release and force 0x8F before any CRAM walk")
+    print("  spr_set_sat_col: NORMAL skips CRAM/8659 every tick")
+
+    nibfn = fn_span(ent, "static u8 sat_col_tile_nibble(const Slot *s, u8 want)")
+    if not nibfn:
+        return fail("sat_col_tile_nibble missing")
+    if "ebullet_bolinha" not in nibfn or "options_bullet_high" not in nibfn:
+        return fail("sat_col_tile_nibble must force NORMAL bolinha nibble 15")
+    if mentions_skill(nibfn):
+        return fail("sat_col_tile_nibble must not consult skill/ALC")
+    cram_at = nibfn.find("s->cram_nib")
+    white_at = nibfn.find("return 15")
+    if white_at < 0 or cram_at < 0 or white_at > cram_at:
+        return fail("NORMAL bolinha nibble 15 must win over leftover cram_nib")
+    print("  sat_col_tile_nibble: NORMAL 15 beats leftover PAL2[4]")
+
+    if not re.search(
+        r"#define\s+SPR_FLAG_NEED_TILES_UPLOAD\s+0x0004", ent
+    ):
+        return fail("NEED_TILES_UPLOAD must be defined (SGDK 2.11 0x0004)")
+    own = fn_span(ent, "static void shot_vram_own(Sprite *sp)")
+    if not own or "SPR_FLAG_NEED_TILES_UPLOAD" not in own:
+        return fail("shot_vram_own must clear NEED_TILES_UPLOAD (packed nibble 4)")
+    up = fn_span(ent, "static void spr_upload_color(Slot *s)") or ""
+    if "shot_vram_own" not in up:
+        return fail("spr_upload_color must own tiles after paint_all")
+    if "dma_nibble_defer" in up and "ebullet_bolinha" not in up[
+        max(0, up.find("dma_nibble_defer") - 40) : up.find("dma_nibble_defer") + 80
+    ]:
+        return fail("dma_nibble_defer must not skip NORMAL bolinha white lock")
+    cb = fn_span(ent, "static void spr_frame_cb(Sprite *sp)") or ""
+    if "shot_vram_own" not in cb:
+        return fail("spr_frame_cb must own tiles before SPR_update loadTiles")
+    print("  NEED_TILES_UPLOAD: packed nibble 4 cannot overwrite white")
+
+    initf = fn_span(
+        ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)"
+    ) or ""
+    place = initf.find("spr_place(e,")
+    if place < 0 or initf.find("ebullet_apply_vis", 0, place) < 0:
+        return fail("init_frag must apply_vis before spr_place (EC)")
+    if initf.find("ebullet_apply_vis", place) < 0:
+        return fail("init_frag must apply_vis after spr_place (NORMAL owns SAT)")
+    print("  init_frag: apply_vis before and after spr_place")
+
     # Spawners of bolinhas: boxes 3x38, guns 21/38, base 21/42/43/45.
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)")
     if not drop or drop.count("spawn_frag") < 3 or ", 38)" not in drop:
         return fail("red-box death must still fire three type-38 bolinhas")
     if "spr_set_sat_col" in (drop or ""):
         return fail("box_death_drop must not colour-walk (init_frag owns vis)")
-    print("  boxes: 3x type 38 via spawn_frag / init_frag")
+    kill = fn_span(ent, "static void box_kill_7878(Slot *e)") or ""
+    if "box_death_drop" not in kill or "drop == 4" not in kill:
+        return fail("type 4 red-box death must box_death_drop 3x38")
+    if "spr_detach" not in kill and "spr_kill" not in kill:
+        return fail("type 4 must drop crate SAT before the 3x38 volley")
+    if "e->sat_col = 0" not in kill and "spr_kill" not in kill:
+        return fail("type 4 must wipe leftover 7860 red before 3x38")
+    print("  boxes: 3x type 38 via spawn_frag / init_frag; crate SAT dropped")
 
     fire = fn_span(ent, "static void base_fire(Slot *e)")
     if not fire:
@@ -246,8 +307,45 @@ def main() -> int:
     high_fn = fn_span(opt, "u8 options_bullet_high(void)") or ""
     if mentions_skill(high_fn):
         return fail("options_bullet_high must ignore skill")
+    if "options_bullet_vis" not in high_fn:
+        return fail("options_bullet_high must read s_bullet_vis only")
+    nudge_sk = fn_span(opt, "void options_nudge_skill(s8 dir)") or ""
+    nudge_bv = fn_span(opt, "void options_nudge_bullet_vis(s8 dir)") or ""
+    if "s_bullet_vis" in nudge_sk:
+        return fail("nudging skill must not write BULLET VISIBILITY")
+    if "s_skill" in nudge_bv:
+        return fail("nudging BULLET VISIBILITY must not write skill")
+
+    # Zero relationship: every colour helper ignores skill/ALC.
+    colour_fns = (
+        "static int ebullet_lead_disc(const Slot *s)",
+        "static int ebullet_bolinha(const Slot *s)",
+        "static int ebullet_bolinha_high(const Slot *s)",
+        "static int ebullet_cram_shot(const Slot *s)",
+        "static void ebullet_apply_vis(Slot *e)",
+        "static void spr_set_sat_col(Slot *s, u8 col)",
+        "static u8 proj_tile_want(const Slot *s)",
+        "static void spr_upload_color(Slot *s)",
+        "static u8 sat_col_tile_nibble(const Slot *s, u8 want)",
+        "static int xor_cram_wanted(const Slot *s)",
+        "static int xor_cram_bind(Slot *s, u8 col)",
+        "static void xor_cram_cycle(Slot *s, u8 col)",
+        "static void xor_cram_paint(Slot *s, u8 nib)",
+        "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)",
+        "static void box_death_drop(s16 sx, s16 sy)",
+        "static void box_kill_7878(Slot *e)",
+        "static void base_fire(Slot *e)",
+        "static void spawn_child_dir(s16 x, s16 y, u8 stype, u8 dir)",
+    )
+    for sig in colour_fns:
+        body = fn_span(ent, sig) or ""
+        if not body:
+            return fail("%s missing (colour path)" % sig.split("(")[0].split()[-1])
+        if mentions_skill(body):
+            return fail("%s must not consult skill/ALC (zero vis/skill relationship)"
+                        % sig.split("(")[0].split()[-1])
     print("  KEEP: OPTIONS vis; no VDP_*Tiles; skill never gates colour")
-    print("ok: NORMAL all bolinhas white; HIGH all bolinhas cycle")
+    print("ok: NORMAL all bolinhas white; HIGH all bolinhas cycle; skill unused")
     return 0
 
 
