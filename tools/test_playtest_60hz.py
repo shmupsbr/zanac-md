@@ -215,10 +215,26 @@ def main() -> int:
     if re.search(r"SHOT_SLOTS\s+2|ENEMY_SLOTS\s+1[0-6]\b", ent):
         return fail("do not shrink shot/enemy pools to fake 60fps")
 
+    # Empty-screen hitch: leftover 4 must not double-assemble.
+    if "peek_assemble_r1_mid" not in map_c:
+        return fail("leftover 2/3 must park R+1 (empty-screen leftover-4 hitch)")
+    if "(s_e711 >> 5) == 2" not in map_c or "(s_e711 >> 5) == 3" not in map_c:
+        return fail("R+1 park on leftover 2 or 3, not on carry")
+    dma = re.search(
+        r"static void dma_nt_row\(u8 nt_y, const u8 \*src, TransferMethod tm\)\s*\{(.*?)^\}",
+        map_c,
+        re.S | re.M,
+    )
+    if not dma or "s_nt[nt_y][x] != src[x]" not in dma.group(1):
+        return fail("identical wrap/peek NT rows must skip the 24-col CPU OUT")
+    if "s_win_tid" not in hud_c:
+        return fail("WINDOW HUD must dirty-check glyphs (idle VDP-port tax)")
+
     print("ok: SPR_update; doVBlank; flush; DMA budget raised; no 30fps cap")
     print("ok: shared XOR CRAM; nibble DMA defer; depth bind at place only")
     print("ok: shot VRAM bank via SPR_setVRAMTileIndex; type 21 PAL2[4] CRAM")
     print("ok: spr_sync_proj; SAT-box collision early-out")
+    print("ok: leftover 2/3 peek split; identical NT skip; HUD dirty-check")
     return 0
 
 

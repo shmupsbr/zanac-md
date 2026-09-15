@@ -54,8 +54,10 @@ int main(bool hardReset)
          *  type 67/45 SAT-name walk still DMA 128 B/tick (shape, not
          *  colour); kinds that miss the shared XOR CRAM nibble defer
          *  colour DMA when the queue is >=4096 B. Shot/lead/bar tiles
-         *  share a VRAM bank after the first upload. Sim never skips
-         *  a vblank. */
+         *  share a VRAM bank after the first upload. Empty-screen
+         *  leftover-4 no longer double-assembles (R+1 on leftover
+         *  2/3); identical wrap/peek NT rows skip the 24-col CPU OUT.
+         *  Sim never skips a vblank. */
         SPR_update();
         SYS_doVBlankProcess();  /* one wait_one_frame 0x4306 */
         DMA_flushQueue();       /* flush in THAT vblank; never before */

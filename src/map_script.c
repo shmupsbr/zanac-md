@@ -138,6 +138,10 @@ static u8  s_peek_nt;
 static u8  s_peek_line[PF_COLS];
 static u8  s_peek_have;         /* tiles pre-assembled on a quiet leftover */
 static u16 s_peek_maprow;
+/* leftover 2/3 parks the discarded R+1 cursors so leftover 4 only
+ * assembles R+2. Both steps on leftover 4 was the empty-screen hitch. */
+static u8  s_peek_mid;
+static u8  s_idol_mid;
 /* Two DMA_QUEUE HUD sources -- SGDK stores the pointer until vblank.
  * Playfield is 24-col CPU (Japan 9a79); only the HUD slice is queued.
  * Original pads dst[24-31] so the restore cannot leak leftover charset. */
@@ -146,6 +150,8 @@ static u8  s_dma_flip;
 static TransferMethod s_row_tm = DMA_QUEUE;
 static ColSlot s_col_snap[COL_SLOTS];
 static StreamSlot s_stream_snap[STREAM_SLOTS];
+static ColSlot s_col_mid[COL_SLOTS];
+static StreamSlot s_stream_mid[STREAM_SLOTS];
 
 static void stream_stamp_buf(void);
 static void arm_ending_stream(void);
@@ -154,7 +160,9 @@ static void fire_pending(void);
 static void scroll_precompute(u16 map_row);
 static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm);
 static void peek_assemble_row(u16 map_row);
+static void peek_assemble_r1_mid(void);
 static void peek_assemble_two_ahead(void);
+static void peek_mid_clear(void);
 static void peek_next_row_at(u16 map_row, u16 wrap_px);
 static void peek_next_row(u16 map_row);
 static u8 hidden_wrap_nt_at(u16 scroll_px);
@@ -691,6 +699,18 @@ static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm)
     TransferMethod play_tm;
 
     nt_y &= 31;
+    /* Empty / repeating sky reprints the same 24 cells into the wrap
+     * slot. The 24-col CPU OUT is the carry hitch when nothing is on
+     * screen -- skip the VDP burst when s_nt already matches. Punches
+     * update s_nt (nt_put / punch_cell), so a live 87e2/88ed still
+     * mismatches and writes. */
+    for (x = 0; x < PF_COLS; x++)
+    {
+        if (s_nt[nt_y][x] != src[x])
+            break;
+    }
+    if (x == PF_COLS)
+        return;
     dst = s_dma_row[s_dma_flip];
     for (x = 0; x < PF_COLS; x++)
     {
@@ -852,7 +872,37 @@ static void peek_assemble_row(u16 map_row)
  * same tiles into wrap(pre) and the peek sliver — an ~8px duplicated
  * band at the playfield top when ground / boss tiles entered.
  * Step once (discard), step again (keep), then restore.
+ *
+ * Both steps used to run on leftover 4 (quiet). That double
+ * assemble_row is the empty-playfield "soquinho": no sprites, still
+ * a 68000 spike every 8 cruise frames. leftover 2/3 now parks the
+ * discarded R+1 cursors; leftover 4 only assembles R+2. Fast scroll
+ * that skips leftover 2/3 still falls back to both steps here.
  */
+static void peek_mid_clear(void)
+{
+    s_peek_mid = 0;
+}
+
+static void peek_assemble_r1_mid(void)
+{
+    u8 idol_snap;
+
+    memcpy(s_col_snap, s_col, sizeof(s_col));
+    memcpy(s_stream_snap, s_stream, sizeof(s_stream));
+    idol_snap = s_idol_cur;
+    s_assemble_peek = 1;
+    assemble_row((u16)(s_ms.row + 1));
+    s_assemble_peek = 0;
+    memcpy(s_col_mid, s_col, sizeof(s_col));
+    memcpy(s_stream_mid, s_stream, sizeof(s_stream));
+    s_idol_mid = s_idol_cur;
+    memcpy(s_col, s_col_snap, sizeof(s_col));
+    memcpy(s_stream, s_stream_snap, sizeof(s_stream));
+    s_idol_cur = idol_snap;
+    s_peek_mid = 1;
+}
+
 static void peek_assemble_two_ahead(void)
 {
     u8 x;
@@ -862,7 +912,14 @@ static void peek_assemble_two_ahead(void)
     memcpy(s_stream_snap, s_stream, sizeof(s_stream));
     idol_snap = s_idol_cur;
     s_assemble_peek = 1;
-    assemble_row((u16)(s_ms.row + 1));
+    if (s_peek_mid)
+    {
+        memcpy(s_col, s_col_mid, sizeof(s_col));
+        memcpy(s_stream, s_stream_mid, sizeof(s_stream));
+        s_idol_cur = s_idol_mid;
+    }
+    else
+        assemble_row((u16)(s_ms.row + 1));
     assemble_row((u16)(s_ms.row + 2));
     s_assemble_peek = 0;
     for (x = 0; x < PF_COLS; x++)
@@ -872,6 +929,7 @@ static void peek_assemble_two_ahead(void)
     s_idol_cur = idol_snap;
     s_peek_have = 1;
     s_peek_maprow = (u16)(s_ms.row + 2);
+    peek_mid_clear();
 }
 
 static void peek_next_row_at(u16 map_row, u16 wrap_px)
@@ -880,7 +938,9 @@ static void peek_next_row_at(u16 map_row, u16 wrap_px)
         return;
     /* Quiet leftover frames pre-assemble row+2 (two stream steps) so
      * the carry tick is 97e3 + DMA only. Cmd 9 jumps discard a
-     * mismatched cache. */
+     * mismatched cache. A parked leftover-2/3 mid-state is stale
+     * once this carry (or boot peek) consumes the sliver. */
+    peek_mid_clear();
     if (!(s_peek_have && s_peek_maprow == map_row))
         peek_assemble_row(map_row);
     s_peek_have = 0;
@@ -2751,6 +2811,7 @@ static void scroll_speed_reset(u8 target)
     s_wrap_pending = 0;
     s_peek_pending = 0;
     s_peek_have = 0;
+    peek_mid_clear();
     s_row_carry = 0;
     s_scroll_base = 0;
     s_ram_only = 0;
@@ -3360,6 +3421,14 @@ void map_script_update(void)
                 }
                 base_approach(1);
             }
+        }
+        else if (((s_e711 >> 5) == 2 || (s_e711 >> 5) == 3)
+                 && !s_peek_have && !s_peek_mid && !s_warp_jingle
+                 && !s_clr_phase && !s_end_phase)
+        {
+            /* Discard R+1 on leftover 2 (or 3 if 0x34 skips 2).
+             * leftover 4 then only keeps R+2. */
+            peek_assemble_r1_mid();
         }
         else if ((s_e711 >> 5) == 4 && !s_peek_have && !s_warp_jingle
                  && !s_clr_phase && !s_end_phase)

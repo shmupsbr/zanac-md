@@ -106,7 +106,7 @@ def main() -> int:
     if not two_fn:
         return fail("leftover 4 must use peek_assemble_two_ahead (two stream steps)")
     if two_fn.count("assemble_row") < 2:
-        return fail("two_ahead must assemble_row twice (discard R+1, keep R+2)")
+        return fail("two_ahead fallback must still name both assemble_row steps")
     if "assemble_row((u16)(s_ms.row + 1))" not in two_fn:
         return fail("first leftover-4 step is R+1 (the next 97e3 row, discarded)")
     if "assemble_row((u16)(s_ms.row + 2))" not in two_fn:
@@ -115,6 +115,11 @@ def main() -> int:
         "assemble_row((u16)(s_ms.row + 2))"
     ):
         return fail("R+1 discard must run before R+2 keep")
+    if "s_peek_mid" not in two_fn:
+        return fail("leftover 4 must resume parked leftover-2/3 R+1 cursors")
+    mid_fn = fn_span(mp, "static void peek_assemble_r1_mid(void)")
+    if not mid_fn or "assemble_row((u16)(s_ms.row + 1))" not in mid_fn:
+        return fail("leftover 2/3 must park R+1 so leftover 4 is one assemble")
     if "s_assemble_peek = 1" not in two_fn or "s_assemble_peek = 0" not in two_fn:
         return fail("two_ahead must stay peek (no place_tile_group spawn)")
     if "s_idol_cur = idol_snap" not in two_fn:
