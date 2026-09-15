@@ -143,6 +143,29 @@ def main() -> int:
     if not fire or "spr_set_sat_col" in fire:
         return fail("KEEP: fire 7 cycle stays CRAM-only")
 
+    paint = fn_span(ent, "static void xor_cram_paint(Slot *s, u8 nib)")
+    if not paint:
+        return fail("xor_cram_paint not found")
+    if not re.search(r"remap_cache_get\([^;]*1\)", paint):
+        return fail("xor_cram_paint must paint_all (packed nibble 15 != baked 4)")
+    if re.search(r"remap_cache_get\([^;]*,\s*0\s*\)", paint):
+        return fail("xor_cram_paint remap-from-baked misses SGDK-packed 15")
+    print("  xor_cram_paint: paint_all onto CRAM nibble")
+
+    want = fn_span(ent, "static u8 proj_tile_want(const Slot *s)")
+    if not want or "LIGHTBAR_CRAM_NIB" not in want or "variant == 21" not in want:
+        return fail("proj_tile_want must key type 21 on LIGHTBAR_CRAM_NIB (not leftover 0x8F)")
+    print("  proj_tile_want: type 21 always nibble 4")
+
+    point = fn_span(ent, "static void shot_vram_point(Sprite *sp, u16 idx)")
+    if not point:
+        return fail("shot_vram_point not found")
+    auto_at = point.find("SPR_setAutoTileUpload")
+    idx_at = point.find("SPR_setVRAMTileIndex")
+    if auto_at < 0 or idx_at < 0 or auto_at > idx_at:
+        return fail("drop AUTO_TILE_UPLOAD before SPR_setVRAMTileIndex (NEED_TILES_UPLOAD)")
+    print("  shot_vram_point: AutoTileUpload off before setVRAMTileIndex")
+
     print("ok: XOR leftovers CRAM-bind; fire7 nibble 13 KEEP")
     return 0
 

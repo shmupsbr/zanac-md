@@ -159,6 +159,24 @@ def main() -> int:
         return fail("Filipe SGDK 2.11 has no VDP_allocateTiles/releaseTiles")
     if "SPR_setVRAMTileIndex" not in ent:
         return fail("later shots must SPR_setVRAMTileIndex onto the banked index")
+    point = re.search(
+        r"static void shot_vram_point\(Sprite \*sp, u16 idx\)\s*\{(.*?)^\}",
+        ent,
+        re.S | re.M,
+    )
+    if not point:
+        return fail("shot_vram_point not found")
+    auto_at = point.group(1).find("SPR_setAutoTileUpload")
+    idx_at = point.group(1).find("SPR_setVRAMTileIndex")
+    if auto_at < 0 or idx_at < 0 or auto_at > idx_at:
+        return fail("AUTO_TILE_UPLOAD must drop before SPR_setVRAMTileIndex")
+    wantp = re.search(
+        r"static u8 proj_tile_want\(const Slot \*s\)\s*\{(.*?)^\}",
+        ent,
+        re.S | re.M,
+    )
+    if not wantp or "variant == 21" not in wantp.group(1) or "LIGHTBAR_CRAM_NIB" not in wantp.group(1):
+        return fail("type 21 must bank on LIGHTBAR_CRAM_NIB, not leftover sat_col 15")
     cache = re.search(
         r"static int shot_vram_cacheable\(const Slot \*s, u8 want\)\s*\{(.*?)^\}",
         ent,
