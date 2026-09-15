@@ -5,6 +5,7 @@
 #include "map_script.h"
 #include "resources.h"
 #include "sound.h"
+#include "options.h"
 #include <string.h>
 
 /*
@@ -2072,6 +2073,9 @@ static void alc_recompute(void)
         pos = 0xFF;
     if (pos >= 0xA0)
         pos = 0x9F;
+    /* Easy: never exceed ALC_HALF_RANK 0x50 (50% of the 0xA0 clamp).
+     * Hard is a start seed on E12E, not a per-frame floor. */
+    pos = options_alc_effective(pos);
     half = (u8)(pos >> 1);
     de = (u8)(half & 0x7E);
     if (de + 1u >= SPAWN_PAIR_LEN)
@@ -6797,7 +6801,9 @@ void entity_on_spawn_pace(s8 nudge)
 
 void entity_alc_reset(void)
 {
-    s_spawn_pos_hi = 0;
+    /* Hard starts at ALC_HALF_RANK so the first BE27 table is ~half
+     * rank. Easy/Normal still zero E12E (title_screen_init / 40DA). */
+    s_spawn_pos_hi = options_alc_start_e12e();
     s_spawn_pos_lo = 0;
     s_e131 = 0;
     s_e132 = 0;

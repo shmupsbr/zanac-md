@@ -5,6 +5,7 @@
 #include "sound.h"
 #include "hud.h"
 #include "vel_dir.h"
+#include "options.h"
 
 #ifndef SPR_FLAG_AUTO_DEPTH
 #define SPR_FLAG_AUTO_DEPTH 0x0200
@@ -249,7 +250,7 @@ void player_init(void)
     place_start();
     s_shot_cd = 0;
     s_alc_cadence = 0;
-    s_lives = PLAYER_LIVES_INIT;
+    s_lives = options_player_ships();
     s_shot_level = 0;
     s_fire_num = 0;
     s_fire_counter = k_fire_init[0][0];
@@ -753,22 +754,24 @@ void player_update(void)
     if (s_alc_cadence < 255)
         s_alc_cadence++;
 
-    /* MD fire split (intentional, not MSX 1:1):
+    /* MD fire split (intentional, not MSX 1:1). Default remap:
      *   A = SPACE both: primary shot + secondary fire-weapon
      *   B = primary only (no type-3 spawn, so E14D does not DEC)
      *   C = secondary only (type-3; fire_dec_ammo on A or C, not B)
+     * OPTIONS can reassign the three roles; no duplicate buttons.
      * MSX E100 bit4 is one SPACE. 767e: primary NOT held -> E110=1
-     * and skip ALC/shot (76e9). Held: DEC E110; on 0 reload 0x14,
-     * 76a7/76b0/76bc, try spawn. Release->repress fires next frame
+     * and skip ALC/shot (76e9). Held: DEC E110; on 0 reload the
+     * autofire period (Normal = 0x14), 76a7/76b0/76bc, try spawn.
+     * E13F still resets on shot. Release->repress fires next frame
      * so E13F can index shot_rate_table. */
-    if (joy & (BUTTON_A | BUTTON_B))
+    if (joy & options_primary_buttons())
     {
         if (s_shot_cd)
             s_shot_cd--;
         if (!s_shot_cd)
         {
             entity_on_shot_fired(s_alc_cadence);
-            s_shot_cd = SHOT_PERIOD;
+            s_shot_cd = options_shot_period();
             s_alc_cadence = 0;
             if (entity_spawn_shot(s_x, s_y))
                 sound_play_shot();
@@ -778,8 +781,8 @@ void player_update(void)
         s_shot_cd = 1;      /* 7682-7684: LD (E110),1 while fire released */
 
     /* bit5 held AND E380==0 -> spawn type 3. Fire 2 is also forced live on select.
-     * A or C only — B must not spawn the depleting special. */
-    if ((joy & (BUTTON_A | BUTTON_C)) || s_fire_num == 2)
+     * Default A or C — B must not spawn the depleting special. Remap via OPTIONS. */
+    if ((joy & options_secondary_buttons()) || s_fire_num == 2)
         entity_try_spawn_fire(s_x, s_y, s_xvel_sel);
 
     /* 7710: BIT 7 +05; XOR +04 0x0E; DEC +1B; Z → RES 7 + restore 0x8F.

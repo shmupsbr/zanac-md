@@ -7,6 +7,7 @@
 #include "sound.h"
 #include "hud.h"
 #include "title_logo.h"
+#include "options.h"
 #include <string.h>
 
 /*
@@ -2238,7 +2239,8 @@ static void cmd_wide_slot(u8 cmd, const u8 *ops)
     u16 ptr = read_le16(ops + 5);
 
     (void)cmd;
-    s_e155 = ops[0];
+    /* Scale the armed TIME limit (E155 BCD minutes), not the tick. */
+    s_e155 = options_scale_time(ops[0]);
     s_e156 = ops[1];
     s_e157 = ops[2];
     s_e158 = ops[3];
