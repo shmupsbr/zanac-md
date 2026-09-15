@@ -350,12 +350,26 @@
 #define FIRE7_CRAM_NIB  13
 /* Bolinha discs (FRAME_LEAD 20/37/38/41/42/43) and type 45 bar/med
  * pulse share BULLET VISIBILITY. NORMAL = Japan 0x8F / baked 15
- * white+EC, no 8659. HIGH = PAL2[4] 8659 R-nibble|0x80.
+ * white+EC, no 8659. HIGH = TYPE21_CRAM_NIB 8659 R-nibble|0x80.
  * Type 21 FRAME_LIGHT_BAR (`<===>`) is NOT in that switch: Japan
  * 8659 always colour-walks (8639 JR NZ 8659, no vis option). #143
  * wrongly forced it white under NORMAL.
- * Skill / ALC never enter. XOR walkers stay on nibble 2. */
-#define LIGHTBAR_CRAM_NIB  4
+ * Skill / ALC never enter. XOR walkers stay on nibble 2.
+ *
+ * #146 still had zero playtest effect: type 21 walked PAL2[4] while
+ * SGDK-packed FRAME_LEAD pixels are nibble 4, and leave_white only
+ * checked the *same frame* — a reused LIGHT_BAR sprite painted 4
+ * into the shared white disc index. Dedicated CRAM, not 4, not 15. */
+#define LEAD_PACKED_NIB     4   /* SGDK FRAME_LEAD pixels; never 8659 */
+#define LEAD_WHITE_NIB     15   /* NORMAL Japan 0x8F bake */
+#define TYPE21_CRAM_NIB     3   /* type 21 / HIGH 8659; not packed 4 */
+#define LIGHTBAR_CRAM_NIB   TYPE21_CRAM_NIB
+/* C89 static asserts: type 21 must not walk lead packed/white/fire/XOR. */
+typedef char type21_cram_not_packed[(TYPE21_CRAM_NIB != LEAD_PACKED_NIB) ? 1 : -1];
+typedef char type21_cram_not_white[(TYPE21_CRAM_NIB != LEAD_WHITE_NIB) ? 1 : -1];
+typedef char type21_cram_not_fire[(TYPE21_CRAM_NIB != FIRE7_CRAM_NIB) ? 1 : -1];
+typedef char type21_cram_not_xor[(TYPE21_CRAM_NIB != 2) ? 1 : -1];
+typedef char type21_cram_not_trans[(TYPE21_CRAM_NIB != 0) ? 1 : -1];
 #define KIND_BOX        4
 #define KIND_DUSTER     10
 #define KIND_TERUZO     12
@@ -438,7 +452,7 @@ static Slot s_fire;
 static u8  s_fire7_life_ticked;
 static u8  s_fire7_cram;        /* PAL2[13] borrowed for 72de cycle */
 static u8  s_fire7_col;         /* 72de SAT colour; INC then AND 0x8F */
-static u8  s_bar_cram_refs;     /* type 21 bars sharing PAL2[4] */
+static u8  s_bar_cram_refs;     /* type 21 / HIGH sharing TYPE21_CRAM_NIB */
 /* 7221 BIT 7: init RET, no 4898. Set when entity_spawn_shot already ran
  * 7228-724e this frame (player_update then entity_update). */
 static u8  s_shot_init_ret[SHOT_SLOTS];
@@ -646,7 +660,8 @@ static u8 rnd(void);
  * 2.11 / current engine: 0x0004. SPR_update loadTiles() of the raw
  * objs.png (SGDK-packed nibble 4 on FRAME_LEAD) if this bit stays
  * set after we paint_all onto 15 — NORMAL bolinhas then sit on
- * PAL2[4] (TMS dark blue) instead of white. HIGH still wants 4. */
+ * packed nibble 4 (TMS dark blue) instead of white. Type 21 8659
+ * no longer walks PAL2[4]; HIGH paints onto TYPE21_CRAM_NIB. */
 #ifndef SPR_FLAG_NEED_TILES_UPLOAD
 #define SPR_FLAG_NEED_TILES_UPLOAD  0x0004
 #endif
@@ -757,8 +772,8 @@ static const u8 k_frame_color[FRAME_N];
  * sprites at that index (no DMA). Filipe's SGDK 2.11 has no public
  * VDP_allocateTiles / VDP_releaseTiles; sprite_eng uses AUTO_VRAM_ALLOC
  * and SPR_setVRAMTileIndex (which VRAM_free's the unused AUTO slot).
- * Type 21 8659 is CRAM on PAL2[4], so bars share one bank key.
- * Lead discs stay on baked nibble 15 (white).
+ * Type 21 8659 is CRAM on TYPE21_CRAM_NIB (not packed lead 4), so
+ * bars share one bank key. Lead discs stay on baked nibble 15.
  */
 #define SHOT_BANK_N  12
 typedef struct {
@@ -772,6 +787,7 @@ typedef struct {
     u16 index;
 } ShotBank;
 static ShotBank s_shot_bank[SHOT_BANK_N];
+static u8 s_lead_white_ok;      /* RAM paint_all-15 FRAME_LEAD blit */
 
 static int shot_art_shareable(const Slot *s)
 {
@@ -830,8 +846,8 @@ static int ebullet_normal_lock(const Slot *s)
     return ebullet_bolinha(s) && !options_bullet_high();
 }
 
-/* Type 21 always PAL2[4] 8659. HIGH bolinhas same. NORMAL discs
- * stay nibble 15 / no CRAM. */
+/* Type 21 always TYPE21_CRAM_NIB 8659. HIGH bolinhas same. NORMAL
+ * discs stay nibble 15 / no CRAM, never that bank. */
 static int ebullet_cram_shot(const Slot *s)
 {
     if (ebullet_light_bar(s))
@@ -844,10 +860,11 @@ static u8 proj_tile_want(const Slot *s)
     u8 baked;
     u8 want;
 
-    /* HIGH bolinhas key the bank on PAL2[4] even before xor_cram_bind.
-     * Leftover sat_col 0x8F would otherwise bank (frame, 15) and leave
-     * 8659 cycling an unused CRAM slot. NORMAL every bolinha (leads,
-     * type 21 bar, type 45 pulse) banks on baked 15 (TMS white). */
+    /* HIGH bolinhas key the bank on TYPE21_CRAM_NIB even before
+     * xor_cram_bind. Leftover sat_col 0x8F would otherwise bank
+     * (frame, 15) and leave 8659 cycling an unused CRAM slot. NORMAL
+     * every bolinha banks on baked 15 (TMS white) — never type 21's
+     * nibble, never packed 4. */
     if (ebullet_cram_shot(s))
         return LIGHTBAR_CRAM_NIB;
     if (ebullet_bolinha(s))
@@ -955,6 +972,7 @@ static void shot_vram_reset(void)
      * Banked sprites already dropped AUTO so SPR_releaseSprite did not
      * VRAM_free; do not invent VDP_releaseTiles. */
     memset(s_shot_bank, 0, sizeof(s_shot_bank));
+    s_lead_white_ok = 0;
 }
 
 /* Proven paint_all-15: every nonzero body nibble is white. A (frame,15)
@@ -994,17 +1012,47 @@ static int shot_bank_painted_at(u8 frame, u8 nib, u16 idx)
     return 0;
 }
 
-/* Leave a proven white bank before DMA of any other nibble (type 21 /
- * HIGH 8659 nibble 4). Painting 4 into the (frame,15) index makes
- * every shared disc colour-cycle on PAL2[4]. */
-static int shot_vram_leave_white(Sprite *sp, u8 frame, u8 nib)
+/* #146 hole: type 21 FRAME_LIGHT_BAR painted nibble 4 into a VRAM
+ * index that FRAME_LEAD discs still shared, because leave_white
+ * only matched the *same frame*'s painted-15 bank. Any proven white
+ * bank at this index, or any FRAME_LEAD bank, must be left. */
+static int shot_bank_index_is_white(u16 idx)
+{
+    u8 i;
+
+    for (i = 0; i < SHOT_BANK_N; i++)
+    {
+        if (s_shot_bank[i].used && s_shot_bank[i].painted
+            && s_shot_bank[i].nib == LEAD_WHITE_NIB
+            && s_shot_bank[i].index == idx)
+            return 1;
+    }
+    return 0;
+}
+
+static int shot_bank_index_is_lead(u16 idx)
+{
+    u8 i;
+
+    for (i = 0; i < SHOT_BANK_N; i++)
+    {
+        if (s_shot_bank[i].used && s_shot_bank[i].frame == FRAME_LEAD
+            && s_shot_bank[i].index == idx)
+            return 1;
+    }
+    return 0;
+}
+
+/* Leave a proven white / FRAME_LEAD bank before DMA of any other
+ * nibble (type 21 / HIGH 8659). Frame is ignored on purpose. */
+static int shot_vram_leave_white(Sprite *sp, u8 nib)
 {
     u16 cur;
 
-    if (!sp || nib == 15)
+    if (!sp || nib == LEAD_WHITE_NIB)
         return 1;
     cur = (u16)(sp->attribut & TILE_INDEX_MASK);
-    if (!shot_bank_painted_at(frame, 15, cur))
+    if (!shot_bank_index_is_white(cur) && !shot_bank_index_is_lead(cur))
         return 1;
     return shot_vram_fresh_auto(sp);
 }
@@ -1062,13 +1110,15 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
     if (!s->spr || !shot_art_shareable(s))
         return 0;
     /* #142 tagged (FRAME_LEAD, 15) without painting. #145 shared any
-     * remembered 15, including verbatim packed nibble 4. Share only a
-     * bank remember()'d after paint_all-15, and only if this sprite
-     * can sit on that index. Lookup miss still paints. */
+     * remembered 15, including verbatim packed nibble 4. #146 still
+     * leaked: type 21 retargeted onto a FRAME_LEAD index because
+     * leave_white keyed the same frame. NORMAL shares only a proven
+     * paint_all-15 bank of THIS frame. Type 21 / HIGH must not sit on
+     * any white or FRAME_LEAD index. Lookup miss still paints. */
     if (ebullet_normal_lock(s))
     {
-        if (want == 15 && shot_bank_lookup(s->frame, want, &idx)
-            && shot_bank_painted_at(s->frame, 15, idx))
+        if (want == LEAD_WHITE_NIB && shot_bank_lookup(s->frame, want, &idx)
+            && shot_bank_painted_at(s->frame, LEAD_WHITE_NIB, idx))
         {
             shot_vram_point(s->spr, idx);
             s->vram_fr = s->frame;
@@ -1079,8 +1129,9 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
     }
     if (shot_bank_lookup(s->frame, want, &idx))
     {
-        /* HIGH / type 21 nibble 4 must not retarget onto a white bank. */
-        if (want != 15 && shot_bank_painted_at(s->frame, 15, idx))
+        /* Type 21 / HIGH must not retarget onto a white or lead bank. */
+        if (want != LEAD_WHITE_NIB
+            && (shot_bank_index_is_white(idx) || shot_bank_index_is_lead(idx)))
             return 0;
         shot_vram_point(s->spr, idx);
         s->vram_fr = s->frame;
@@ -1702,11 +1753,16 @@ static u16 s_remap_key[REMAP_CACHE_N];
 static u8  s_remap_paint[REMAP_CACHE_N]; /* 1 = paint_all; 0 = from→to */
 static u8  s_remap_used;
 static u8  s_remap_next;
+/* NORMAL FRAME_LEAD: paint_all-15 once into RAM, DMA as one blit.
+ * Per-pixel rebuild every place was the 3+ slowdown; sharing a lying
+ * (frame,15) bank was the colour-cycle. This buffer is the pixels. */
+static u16 s_lead_white[REMAP_TILE_BYTES / 2];
 
 static void remap_cache_reset(void)
 {
     s_remap_used = 0;
     s_remap_next = 0;
+    s_lead_white_ok = 0;
 }
 
 static const u8 *remap_cache_get(u8 frame, u8 baked, u8 want,
@@ -1739,6 +1795,21 @@ static const u8 *remap_cache_get(u8 frame, u8 baked, u8 want,
     s_remap_key[i] = key;
     s_remap_paint[i] = paint_all;
     return dst;
+}
+
+/* NORMAL FRAME_LEAD white pixels. Built once; later DMA is a blit from
+ * this buffer, not orb_paint per disc. Shared VRAM still retargets the
+ * proven bank — this is the miss / first-paint path. */
+static const u8 *lead_white_buf(const u8 *src, u16 nbytes)
+{
+    if (!s_lead_white_ok)
+    {
+        if (nbytes > REMAP_TILE_BYTES)
+            nbytes = REMAP_TILE_BYTES;
+        orb_paint_body_nibbles((u8 *)s_lead_white, src, nbytes, LEAD_WHITE_NIB);
+        s_lead_white_ok = 1;
+    }
+    return (const u8 *)s_lead_white;
 }
 
 static const u8 *orb_cache_get(u8 sat, const u8 *jp, u8 want)
@@ -1887,7 +1958,7 @@ static void spr_upload_color(Slot *s)
         shot_vram_own(sp);
         return;
     }
-    if (!shot_vram_leave_white(sp, s->frame, want))
+    if (!shot_vram_leave_white(sp, want))
         return;
 
     nbytes = (u16)(ts->numTile * 32);
@@ -1900,13 +1971,16 @@ static void spr_upload_color(Slot *s)
     {
         u8 disc = (u8)(s->kind == KIND_EXPL || s->kind == KIND_PDEAD
                        || s->kind == KIND_HUSK);
-        /* HIGH: paint every nonzero nibble onto PAL2[4]. A want==baked
-         * verbatim upload leaves SGDK-packed index 15 (white) in VRAM
-         * while 8659 cycles the unused PAL2[4] (type 21) or packed 4
-         * (leads share PAL2[4] and cycle on NORMAL). paint_all onto 15
-         * isolates the white lock; onto 4 enables the walk. */
+        /* HIGH: paint every nonzero nibble onto TYPE21_CRAM_NIB. A
+         * want==baked verbatim upload leaves SGDK-packed index 4 in
+         * FRAME_LEAD while 8659 walks a different slot — #146. paint_all
+         * onto 15 isolates the white lock; onto TYPE21_CRAM_NIB enables
+         * the HIGH walk. Type 21 never shares that 15 bank. */
         u8 paint_bar = (u8)(ebullet_bolinha(s) || ebullet_normal_lock(s));
         u8 painted = (u8)(disc || paint_bar);
+        u8 lead_white = (u8)(ebullet_normal_lock(s)
+                             && s->frame == FRAME_LEAD
+                             && want == LEAD_WHITE_NIB);
 
         /* Verbatim tiles: queue ROM/FAR src. Skip the 128-byte copy
          * into a DMA scratch (and do not allocateAndQueue an unused buf). */
@@ -1922,14 +1996,19 @@ static void spr_upload_color(Slot *s)
 
         /* Cache the remapped tiles and DMA from the slot. allocateAndQueue
          * every XOR/72de tick was the leftover 68000 cost after the orb
-         * variant cache; a warm (frame,nibble) slot is a plain queue. */
+         * variant cache; a warm (frame,nibble) slot is a plain queue.
+         * NORMAL FRAME_LEAD uses the dedicated white RAM blit. */
         {
-            const u8 *cached = remap_cache_get(s->frame, baked, want, src,
-                                               nbytes, painted);
+            const u8 *cached;
             u16 nq = nbytes;
 
             if (nq > REMAP_TILE_BYTES)
                 nq = REMAP_TILE_BYTES;
+            if (lead_white)
+                cached = lead_white_buf(src, nq);
+            else
+                cached = remap_cache_get(s->frame, baked, want, src,
+                                         nbytes, painted);
             if (disc)
             {
                 static u8 s_disc[REMAP_TILE_BYTES];
@@ -2000,18 +2079,32 @@ static void spr_set_sat_col(Slot *s, u8 col)
 
 /* Colour path for every KIND_EBULLET. Type 21 (`<===>`) always
  * 8659 (Japan 8639/8659) — vis does not gate it. Discs + type 45:
- * NORMAL 0x8F white+EC, HIGH 8659. Skill / ALC never enter. */
+ * NORMAL 0x8F white+EC, HIGH 8659. Skill / ALC never enter.
+ *
+ * Playtest-proof: NORMAL bolinha cannot rnd-walk. ebullet_8659
+ * refuses ebullet_normal_lock at runtime; the NORMAL arm of
+ * apply_vis does not call rnd. Type 21 always can. */
+static void ebullet_8659(Slot *e)
+{
+    if (ebullet_normal_lock(e))
+    {
+        spr_set_sat_col(e, 0x8F);
+        return;
+    }
+    spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+}
+
 static void ebullet_apply_vis(Slot *e)
 {
     if (ebullet_light_bar(e))
     {
-        spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+        ebullet_8659(e);
         return;
     }
     if (!ebullet_bolinha(e))
         return;
     if (options_bullet_high())
-        spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+        ebullet_8659(e);
     else
         spr_set_sat_col(e, 0x8F);
 }
@@ -7396,9 +7489,9 @@ static u8 xor_cram_alloc(const Slot *s)
 
     if (!k)
         return 0;
-    /* HIGH bolinhas bind PAL2[4]. Do not sit in the XOR walker pool —
-     * nibble 2 is exclusive-per-kind and would miss when SIG/FLASH
-     * already owns it. */
+    /* HIGH bolinhas bind TYPE21_CRAM_NIB. Do not sit in the XOR walker
+     * pool — nibble 2 is exclusive-per-kind and would miss when SIG/FLASH
+     * already owns it. Packed FRAME_LEAD 4 is never this nibble. */
     if (ebullet_cram_shot(s))
     {
         s_bar_cram_refs++;
@@ -7413,10 +7506,11 @@ static u8 xor_cram_alloc(const Slot *s)
 
 /* Non-fire tiles must not sit on PAL2[13]: fire 0/1/2/7 72de owns it.
  * Type 67 840a and type 61 8eaf[7] are 0x8D (magenta) — alias to 12.
- * Type 21 8659 owns PAL2[4] (FRAME_LIGHT_BAR bake). Other 0x84 sit on 12. */
+ * Type 21 8659 owns TYPE21_CRAM_NIB. Packed FRAME_LEAD nibble 4 and
+ * that CRAM nibble must not be a live sat_col for anyone else. */
 static u8 sat_col_tile_nibble(const Slot *s, u8 want)
 {
-    /* NORMAL bolinha: never sit on leftover CRAM (PAL2[4] 8659). */
+    /* NORMAL bolinha: never sit on leftover CRAM (type 21 8659). */
     if (ebullet_normal_lock(s))
         return 15;
     if (s->cram_nib)
@@ -7427,7 +7521,7 @@ static u8 sat_col_tile_nibble(const Slot *s, u8 want)
                      k_tms_vdp[13]);
         return NIB_8D_ALIAS;
     }
-    if (want == LIGHTBAR_CRAM_NIB
+    if ((want == TYPE21_CRAM_NIB || want == LEAD_PACKED_NIB)
         && !ebullet_cram_shot(s))
         return NIB_8D_ALIAS;
     return want;
@@ -7486,7 +7580,7 @@ static void xor_cram_paint(Slot *s, u8 nib)
      * leftover slot alone so we do not overwrite a NORMAL white bar. */
     if (shot_vram_prepare(s, nib, (u8)ts->numTile) && s->vram_nib != nib)
         return;
-    if (!shot_vram_leave_white(sp, s->frame, nib))
+    if (!shot_vram_leave_white(sp, nib))
         return;
     vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);
     src = (const u8 *)FAR_SAFE(ts->tiles, nbytes);
@@ -7545,8 +7639,8 @@ static int xor_cram_bind(Slot *s, u8 col)
 static void xor_cram_cycle(Slot *s, u8 col)
 {
     /* HARD: NORMAL bolinha never writes CRAM. A leftover cram_nib on a
-     * reused slot would walk PAL2[4] and every FRAME_LEAD disc sitting
-     * on packed nibble 4 would colour-cycle (boxes / ground / boss 2). */
+     * reused slot would walk TYPE21_CRAM_NIB. Packed nibble 4 no longer
+     * rides that walk; still refuse so a HIGH leftover cannot tint. */
     if (ebullet_normal_lock(s))
         return;
     s->cram_col = col;

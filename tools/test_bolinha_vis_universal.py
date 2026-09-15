@@ -83,8 +83,10 @@ def main() -> int:
         return fail("ebullet_apply_vis must read BULLET VISIBILITY")
     if mentions_skill(apply):
         return fail("ebullet_apply_vis must not consult skill/ALC")
-    if "0x80|(rnd()&0x0F)" not in apply.replace(" ", ""):
-        return fail("HIGH must 8659-walk inside ebullet_apply_vis")
+    if "ebullet_8659" not in apply:
+        return fail("HIGH must 8659-walk via ebullet_8659 (not inline rnd in apply_vis)")
+    if "rnd(" in apply:
+        return fail("apply_vis NORMAL arm must not call rnd; ebullet_8659 owns the walk")
     if "spr_set_sat_col(e, 0x8F)" not in apply:
         return fail("NORMAL white must go through spr_set_sat_col (EC + upload)")
     if "ebullet_light_bar" not in apply:
@@ -133,21 +135,25 @@ def main() -> int:
         return fail("ebullet_cram_shot must not consult skill/ALC")
     print("  HIGH gate: bolinha_high → cram_shot; no skill")
 
-    # Orphan 8659 walks: every R-nibble|0x80 write must live in apply_vis.
+    # Orphan 8659 walks: every R-nibble|0x80 write must live in ebullet_8659.
     walks = list(WALK_RE.finditer(ent))
     if not walks:
         return fail("no 8659 colour-walk found")
-    apply_start = ent.find("static void ebullet_apply_vis")
-    apply_body = apply or ""
+    walk_fn = fn_span(ent, "static void ebullet_8659(Slot *e)") or ""
+    if "0x80|(rnd()&0x0F)" not in walk_fn.replace(" ", ""):
+        return fail("ebullet_8659 must be the sole rnd colour-walk")
+    if "ebullet_normal_lock" not in walk_fn or "0x8F" not in walk_fn:
+        return fail("ebullet_8659 must refuse NORMAL bolinha (force 0x8F)")
+    walk_start = ent.find("static void ebullet_8659")
     for m in walks:
         pos = m.start()
-        in_apply = apply_start >= 0 and pos > apply_start and pos < apply_start + 800
-        if not in_apply:
+        in_8659 = walk_start >= 0 and pos > walk_start and pos < walk_start + 500
+        if not in_8659:
             snippet = ent[max(0, pos - 80) : pos + 40].replace("\n", " ")
-            return fail("orphan 8659 walk (must only live in ebullet_apply_vis): %s" % snippet)
-    if apply_body.count("0x80") < 1:
-        return fail("apply_vis must contain the 8659 write")
-    print("  no orphan 8659: one walk inside ebullet_apply_vis")
+            return fail("orphan 8659 walk (must only live in ebullet_8659): %s" % snippet)
+    if apply.count("ebullet_8659") < 2:
+        return fail("apply_vis must 8659 type 21 and HIGH via helper")
+    print("  no orphan 8659: walk in ebullet_8659; NORMAL cannot rnd")
 
     # Forced-white sat_col=0x8F on ebullet bolinha sites must go through
     # apply_vis, except comments. Scan KIND_EBULLET arming helpers.
@@ -413,6 +419,7 @@ def main() -> int:
         "static int ebullet_normal_lock(const Slot *s)",
         "static int ebullet_cram_shot(const Slot *s)",
         "static void ebullet_apply_vis(Slot *e)",
+        "static void ebullet_8659(Slot *e)",
         "static void spr_set_sat_col(Slot *s, u8 col)",
         "static u8 proj_tile_want(const Slot *s)",
         "static void spr_upload_color(Slot *s)",

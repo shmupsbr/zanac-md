@@ -124,10 +124,16 @@ def main() -> int:
         return fail("white_proven must match painted + index + nibble 15")
     print("  shot_vram_white_proven: sprite sits on paint_all-15 tiles")
 
-    leave = fn_span(ent, "static int shot_vram_leave_white(Sprite *sp, u8 frame, u8 nib)") or ""
+    leave = fn_span(ent, "static int shot_vram_leave_white(Sprite *sp, u8 nib)") or ""
     if not leave or "shot_vram_fresh_auto" not in leave:
-        return fail("leave_white must fresh_auto off a proven 15 index before nibble-4 DMA")
-    print("  shot_vram_leave_white: type 21 / HIGH cannot tint the white bank")
+        return fail("leave_white must fresh_auto off a proven 15 index before type21 DMA")
+    if "u8 frame" in leave:
+        return fail("#146 hole: leave_white must not key only the same frame")
+    if "shot_bank_index_is_white" not in leave:
+        return fail("leave_white must match any-frame painted-15 at this index")
+    if "shot_bank_index_is_lead" not in leave:
+        return fail("leave_white must leave any FRAME_LEAD bank")
+    print("  shot_vram_leave_white: any white/lead index; type 21 cannot tint")
 
     xpaint = fn_span(ent, "static void xor_cram_paint(Slot *s, u8 nib)") or ""
     if "shot_vram_leave_white" not in xpaint:
@@ -147,7 +153,7 @@ def main() -> int:
     high_at = apply.find("options_bullet_high")
     if light_at < 0 or high_at < 0 or light_at > high_at:
         return fail("type 21 8659 must stay always-on, before vis-gated discs")
-    if apply[light_at:high_at].count("0x80") < 1:
+    if apply[light_at:high_at].count("ebullet_8659") < 1:
         return fail("type 21 arm must still 8659")
     print("  apply_vis: type 21 always cycles; HIGH discs cycle")
 
