@@ -250,8 +250,9 @@
  *   21      light_bar 863b: +0x17=4, dir=+0x1a&0x0F, set_vel 8.8, SFX ev0x16;
  *           SAT 0x18 pat 6. Init writes no +04. 8650 SET 7 / 8656 JP 5189
  *           (no 8659, no 4898). Active 8659: R-nibble|0x80 then 4898 / 44ba
- *           (EC bit7 so mode_draw_x is SAT-32). Port: spr FRAME_LIGHT_BAR;
- *           skip first step; 8659 then 4898 u8 wrap-cull.
+ *           (EC bit7 so mode_draw_x is SAT-32). Japan always colour-walks;
+ *           BULLET VISIBILITY does not gate this `<===>` bar. Port:
+ *           spr FRAME_LIGHT_BAR; skip first step; 8659 then 4898 u8 wrap-cull.
  *           Child of guns 46-55 / type 85-86. Not in spawn_type_list 0xBECC;
  *           stream path (is_port_type) uses 71c5 + leftover +0x1a=0.
  *   38      burst_fragment 8507: +0x17=3, dir=+0x1a&0x0F, set_vel 8.8 (42/43 path sans XOR)
@@ -347,15 +348,13 @@
 #define KIND_FIRE       3
 /* Fire 0/1/2/7 72de owns PAL2[13]. Shot-bank keys use the same index. */
 #define FIRE7_CRAM_NIB  13
-/* Every tiro bolinha (FRAME_LEAD 20/37/38/41/42/43, FRAME_LIGHT_BAR
- * 21, type 45 bar/med pulse) shares one vis switch. NORMAL = Japan
- * 0x8F / baked 15 white+EC, no 8659, no PAL2[4] walk. HIGH = #136
- * PAL2[4] 8659 R-nibble|0x80 on all of them (boxes, edge guns,
- * both bosses, horizontals). Skill / ALC never enter.
- * Bind every nonzero body nibble to PAL2[4] once on HIGH so bars
- * and discs share one shot-bank key. Do not verbatim-DMA: SGDK may
- * pack 15 onto 4 (leads cycle on NORMAL) or 4 onto 15 (bars stay
- * white while PAL2[4] pulses). XOR walkers stay on nibble 2. */
+/* Bolinha discs (FRAME_LEAD 20/37/38/41/42/43) and type 45 bar/med
+ * pulse share BULLET VISIBILITY. NORMAL = Japan 0x8F / baked 15
+ * white+EC, no 8659. HIGH = PAL2[4] 8659 R-nibble|0x80.
+ * Type 21 FRAME_LIGHT_BAR (`<===>`) is NOT in that switch: Japan
+ * 8659 always colour-walks (8639 JR NZ 8659, no vis option). #143
+ * wrongly forced it white under NORMAL.
+ * Skill / ALC never enter. XOR walkers stay on nibble 2. */
 #define LIGHTBAR_CRAM_NIB  4
 #define KIND_BOX        4
 #define KIND_DUSTER     10
@@ -789,11 +788,18 @@ static int ebullet_lead_disc(const Slot *s)
             || v == 41 || v == 42 || v == 43);
 }
 
-/* Every KIND_EBULLET is a tiro bolinha. Named types stay listed so a
- * future non-disc ebullet cannot silently drop out of vis: FRAME_LEAD
- * 20/37/38/41/42/43, FRAME_LIGHT_BAR 21, type 45 bar/med. Boxes
- * (3x type 38), edge guns (k_gun 21/38), spawners, wide 84-86, both
- * bosses (73-79 fire 21/38/42/43/45). Skill / ALC never enter. */
+/* Japan 8659 light_bar (`<===>`, SAT 0x18 pat 6). Not a bolinha:
+ * colour-walks every frame regardless of BULLET VISIBILITY. */
+static int ebullet_light_bar(const Slot *s)
+{
+    return (s->kind == KIND_EBULLET
+            && (u8)(s->variant & 0x7F) == 21);
+}
+
+/* Vis-gated white discs + type 45 bar/med (Japan 0x8F). Type 21 is
+ * ebullet_light_bar, not this list. Boxes 3x38, k_gun type 38,
+ * spawners, wide 84-86, bosses 73-79 FRAME_LEAD / type 45.
+ * Skill / ALC never enter. */
 static int ebullet_bolinha(const Slot *s)
 {
     u8 v;
@@ -803,9 +809,7 @@ static int ebullet_bolinha(const Slot *s)
     if (ebullet_lead_disc(s))
         return 1;
     v = (u8)(s->variant & 0x7F);
-    if (v == 21 || v == 45)
-        return 1;
-    return 1;
+    return (v == 45);
 }
 
 /* OPTIONS BULLET VISIBILITY only. Skill / ALC never enter:
@@ -816,18 +820,19 @@ static int ebullet_bolinha_high(const Slot *s)
 }
 
 /* NORMAL vis: Japan white lock. zanac.asm +04=0x8F at 84eb (37/42),
- * 8513 (38/43/45 via 850b), 8539 (41), 8672 (20). Type 21 init 863b
- * writes no +04; active 8659 is HIGH-only. Named so every colour
- * choke (spr_set_sat_col / xor_cram / tile bank) can hard-refuse a
- * walk without duplicating the vis test. */
+ * 8513 (38/43/45 via 850b), 8539 (41), 8672 (20). Type 21 is not
+ * locked: active 8659 is always-on (Japan has no vis option). */
 static int ebullet_normal_lock(const Slot *s)
 {
     return ebullet_bolinha(s) && !options_bullet_high();
 }
 
-/* HIGH vis: PAL2[4] 8659 walk. NORMAL: not a CRAM shot (white lock). */
+/* Type 21 always PAL2[4] 8659. HIGH bolinhas same. NORMAL discs
+ * stay nibble 15 / no CRAM. */
 static int ebullet_cram_shot(const Slot *s)
 {
+    if (ebullet_light_bar(s))
+        return 1;
     return ebullet_bolinha_high(s);
 }
 
@@ -978,13 +983,21 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
 
     if (!s->spr || !shot_art_shareable(s))
         return 0;
-    /* #140/#142: (FRAME_LEAD, 15) bank skip left packed nibble 4 in
-     * VRAM. XOR walkers cycle PAL2[2]; leftover 8659 cycles PAL2[4].
-     * Box×3 / k_gun 38 / boss-2 type 42 all share that bank, so
-     * NORMAL still colour-walked while type 21 (own LIGHT_BAR bank)
-     * looked white. Always paint_all onto 15 under the lock. */
+    /* #142 tagged (FRAME_LEAD, 15) without painting. Share only a
+     * bank remember()'d after a real paint_all-15 DMA. Lookup miss
+     * still returns 0 so the first disc paints. 3+ white bolinhas
+     * then retarget that bank instead of a 128 B DMA each. */
     if (ebullet_normal_lock(s))
+    {
+        if (shot_bank_lookup(s->frame, want, &idx))
+        {
+            shot_vram_point(s->spr, idx);
+            s->vram_fr = s->frame;
+            s->vram_nib = want;
+            return 1;
+        }
         return 0;
+    }
     if (shot_bank_lookup(s->frame, want, &idx))
     {
         shot_vram_point(s->spr, idx);
@@ -1757,14 +1770,12 @@ static void spr_upload_color(Slot *s)
         return;
 
     /* Same frame + same nibble: vis/XOR-high-nibble blinks must not DMA.
-     * NORMAL bolinha is the exception: #143 tagged (FRAME_LEAD, 15) after
-     * paint_all, then SPR_update loadTiles packed nibble 4 over the bank
-     * when AUTO_TILE_UPLOAD was still on (box×3 reuse of crate/flyer
-     * sprites). Later ticks saw vram_nib==15 and skipped, so the volley
-     * colour-cycled forever while boss new-sprites (own-after-place)
-     * stayed white. Always paint_all-15 under the lock. */
-    if (s->vram_fr == s->frame && s->vram_nib == want
-        && !ebullet_normal_lock(s))
+     * #144 refused this skip under NORMAL so every white bolinha
+     * paint_all-15'd 128 B/tick (3+ volley slowdown). Poison was
+     * AUTO_TILE_UPLOAD / NEED_TILES_UPLOAD overwriting the bank;
+     * shot_vram_own on place + spr_sync_proj already closes that.
+     * Skip DMA when the tag is honest. */
+    if (s->vram_fr == s->frame && s->vram_nib == want)
         return;
     /* Same art, only sat_col nibble changed. Defer when the queue is
      * already holding SAT-name tiles / NT / first-bind CRAM paint.
@@ -1887,15 +1898,16 @@ static void spr_set_sat_col(Slot *s, u8 col)
         spr_upload_color(s);
 }
 
-/* One colour path for every tiro bolinha. Call from every arming
- * (init_frag / spawn_lead20 / spawn_ebullet_dir / stream 20) AND
- * again after spr_place so the first SAT exists when NORMAL forces
- * nibble 15. Per-frame 8659 sites: type 20, 21/37/38/42/43/45, 41,
- * init_ret. NORMAL: 0x8F white+EC, skip CRAM/8659 entirely (gated
- * inside spr_set_sat_col). HIGH: 8659 R-nibble|0x80. Skill / ALC
- * never enter. */
+/* Colour path for every KIND_EBULLET. Type 21 (`<===>`) always
+ * 8659 (Japan 8639/8659) — vis does not gate it. Discs + type 45:
+ * NORMAL 0x8F white+EC, HIGH 8659. Skill / ALC never enter. */
 static void ebullet_apply_vis(Slot *e)
 {
+    if (ebullet_light_bar(e))
+    {
+        spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+        return;
+    }
     if (!ebullet_bolinha(e))
         return;
     if (options_bullet_high())
@@ -3958,7 +3970,11 @@ static void riser_ensure_spr(Slot *e)
     e->sat = 0;
     SPR_setAnimAndFrame(e->spr, 0, FRAME_BOX);
     e->sat = 0;
+    /* FRAME_BOX is only the 16x16 vehicle. Drop AUTO/NEED so
+     * SPR_update loadTiles cannot stamp crate pixels over the
+     * SGT DMA (that is one "sprite corrompido" path). */
     e->spr->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
+    shot_vram_own(e->spr);
     sat_bind_depth(e->spr, sat_depth_primary(e));
 }
 
@@ -4308,10 +4324,10 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     }
     e->alive = 1;
     /* Japan 863b: type 21 writes no +04 (variant != 21 was 0x8F).
-     * Vis helper owns every bolinha: NORMAL 0x8F, HIGH 8659.
+     * apply_vis: type 21 always 8659; discs/45 NORMAL 0x8F HIGH 8659.
      * Apply before spr_place so EC bit7 is set for mode_draw_x, then
-     * again after so NORMAL paint_all-15 owns the new SAT (first
-     * place used to leave NEED_TILES_UPLOAD / packed nibble 4). */
+     * again after so NORMAL paint_all-15 owns a new SAT (first place
+     * used to leave NEED_TILES_UPLOAD / packed nibble 4). */
     ebullet_apply_vis(e);
     /* 21: SAT 0x18 pat 6. 45: 850b writes 0x1C then 8625 pulses 0x18/0x20. */
     spr_place(e, (variant == 21 || variant == 45) ? FRAME_LIGHT_BAR : FRAME_LEAD);
@@ -6491,8 +6507,8 @@ static void update_enemies(void)
              * Type 45 (0x8608): DEC clock/+0x1c before 4898; on 0: R bit0 ?
              * dir += (R&8)-4 + apply_dir_88(speed) : reload 0x28 then DEC (0x27).
              * 8625: SAT +03 = 0x18 + ((clock&1)<<3) every active frame.
-             * Colour: ebullet_apply_vis — NORMAL white+EC, HIGH 8659,
-             * including type 45 (bolinha-like bar/med). Skill never enters. */
+             * Colour: ebullet_apply_vis — type 21 always 8659 (`<===>`);
+             * discs/45 NORMAL white+EC, HIGH 8659. Skill never enters. */
             ebullet_apply_vis(e);
             if (e->variant == 45)
             {

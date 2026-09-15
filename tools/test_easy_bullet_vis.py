@@ -95,6 +95,7 @@ def main() -> int:
     for sig in (
         "static int ebullet_lead_disc(const Slot *s)",
         "static int ebullet_bolinha(const Slot *s)",
+        "static int ebullet_light_bar(const Slot *s)",
         "static int ebullet_bolinha_high(const Slot *s)",
         "static int ebullet_cram_shot(const Slot *s)",
         "static void ebullet_apply_vis(Slot *e)",
@@ -107,15 +108,18 @@ def main() -> int:
     print("  colour helpers: no skill/ALC")
 
     apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)") or ""
+    if "ebullet_light_bar" not in apply:
+        return fail("type 21 8659 must always run via ebullet_light_bar (not vis)")
     if "options_bullet_high" not in apply:
-        return fail("type 21 8659 must go through apply_vis / HIGH (Easy cannot bypass)")
+        return fail("disc/45 8659 must still go through apply_vis / HIGH")
     if re.search(
-        r"if \(e->variant == 21\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
-        return fail("ungated type 21 8659 still present (Easy NORMAL would cycle)")
-    print("  type 21 8659: HIGH only via apply_vis")
+        r"if \(options_bullet_high\(\)\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
+        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)\s*;\s*\n\s*"
+        r"else\s*\n\s*spr_set_sat_col\(\s*e,\s*0x8F\)",
+        apply,
+    ) and "ebullet_light_bar" not in apply:
+        return fail("type 21 must not share the vis-gated 8659/white pair")
+    print("  type 21 8659: always via apply_vis; discs stay vis")
 
     gun = re.search(r"k_gun\[5\]\[4\]\s*=\s*\{(.*?)\};", ent, re.S)
     if not gun:
@@ -164,7 +168,7 @@ def main() -> int:
 
     if "options_skill" in (fn_span(ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)") or ""):
         return fail("init_frag must not read skill")
-    print("ok: Easy+NORMAL cannot bypass vis; HIGH still 8659s type 21")
+    print("ok: Easy+NORMAL discs stay white; type 21 always 8659s")
     return 0
 
 

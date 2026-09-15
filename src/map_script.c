@@ -1090,7 +1090,7 @@ static const u8 k_riser_sgt[2][32] = {
     }
 };
 
-/* Packed 4bpp 16x16 (4 tiles, TMS 16x16 order UL/LL/UR/LR -> MD UL/UR/LL/LR).
+/* Packed 4bpp 16x16 (4 tiles, Genesis column-major TL,BL,TR,BR).
  * Nibble 7 = cyan (SAT +04 0x87). u32 so DMA long-reads stay aligned. */
 static u32 s_riser_md4[32];
 static u8  s_riser_phase;
@@ -1103,11 +1103,15 @@ static void pack_riser_sgt(u8 phase, u8 nib)
     u8 r;
     u8 px;
 
-    /* TMS 16x16 SGT: 8+8 left (UL,LL) then 8+8 right (UR,LR). */
-    tile[0] = src;
-    tile[1] = src + 16;
-    tile[2] = src + 8;
-    tile[3] = src + 24;
+    /* TMS 16x16 SGT is left 16 rows then right 16 rows (UL+LL, UR+LR).
+     * Genesis sprite tilesets are column-major: TL, BL, TR, BR — the
+     * same order orb_encode_japan_tiles uses. Row-major UL/UR/LL/LR
+     * parked the four quarters in the wrong slots (Filipe: Randar
+     * sprite corrompido). */
+    tile[0] = src;          /* TL  bytes 0-7   */
+    tile[1] = src + 8;      /* BL  bytes 8-15  */
+    tile[2] = src + 16;     /* TR  bytes 16-23 */
+    tile[3] = src + 24;     /* BR  bytes 24-31 */
     for (t = 0; t < 4; t++)
     {
         for (r = 0; r < 8; r++)

@@ -18,7 +18,8 @@ Japan v1 (zanac-re, SHA1 46e9ed7b7f6dfda8eee266476c9ebc4dd9d8fcc2):
   0x8513 type 38 / type 43 CALL 8507 / type 45 CALL 850b: 0x8F
   0x8539 type 41: 0x8F
   0x8672 type 20: 0x8F
-  0x8659 type 21 active only: LD A,R / AND 0x0F / OR 0x80  — HIGH vis
+  0x8659 type 21 active only: LD A,R / AND 0x0F / OR 0x80  — always
+      (not BULLET VISIBILITY; `<===>` bar is not a bolinha)
 
 Usage (from zanac-md):
     python tools/test_bolinha_normal_hard_white.py
@@ -101,10 +102,10 @@ def main() -> int:
 
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
     # return 0 must sit in the lock arm, not only at the function tail.
-    arm = prep.split("ebullet_normal_lock")[1][:120] if "ebullet_normal_lock" in prep else ""
-    if "return 0" not in arm:
-        return fail("shot_vram_prepare NORMAL arm must return 0 (paint_all FRAME_LEAD)")
-    print("  shot_vram_prepare: FRAME_LEAD always paint_all under NORMAL")
+    arm = prep.split("ebullet_normal_lock")[1][:500] if "ebullet_normal_lock" in prep else ""
+    if "shot_bank_lookup" not in arm or "return 0" not in arm:
+        return fail("shot_vram_prepare NORMAL arm must lookup then return 0 on miss")
+    print("  shot_vram_prepare: share remembered 15; miss still paint_all")
 
     place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
     if re.search(
@@ -138,9 +139,11 @@ def main() -> int:
         r"[\s\S]{0,80}?\)\s*return;",
         up,
     )
-    if not skip or "ebullet_normal_lock" not in skip.group(0):
-        return fail("spr_upload_color matching-vram skip must refuse NORMAL lock (poisoned 15 tag)")
-    print("  spr_upload_color: NORMAL never skips paint_all on a (frame,15) tag")
+    if not skip:
+        return fail("spr_upload_color matching-vram skip missing")
+    if "ebullet_normal_lock" in skip.group(0):
+        return fail("NORMAL must not DMA paint_all every tick (3+ volley slowdown)")
+    print("  spr_upload_color: matching skip; own-after-place holds white")
 
     sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""
     if "ebullet_normal_lock" not in sync or "shot_vram_own" not in sync:
@@ -220,11 +223,11 @@ def main() -> int:
             if not re.search(rf"LD\s+\(IX\+0x04\),\s*0x8f\s*;\s*{addr}", asm, re.I):
                 return fail("zanac.asm %s is not LD (IX+04), 0x8F (%s)" % (addr, who))
         if not re.search(r"LD\s+A,\s*R\s*;\s*0x8659", asm, re.I):
-            return fail("zanac.asm 8659 is not LD A,R (type 21 HIGH-only)")
+            return fail("zanac.asm 8659 is not LD A,R (type 21 always-cycle)")
         if not re.search(r"JR\s+NZ,\s*0x8659\s*;\s*0x8639", asm, re.I):
             return fail("zanac.asm 8639 is not JR NZ 8659")
-        print("  zanac.asm: 84eb/8513/8539/8672 +04=0x8F; 8659 type 21 only")
-    print("ok: NORMAL hard-white FRAME_LEAD (boxes/ground/boss2) + type 21; HIGH walks")
+        print("  zanac.asm: 84eb/8513/8539/8672 +04=0x8F; 8659 type 21 always")
+    print("ok: NORMAL hard-white FRAME_LEAD (boxes/ground/boss2); type 21 cycles")
     return 0
 
 

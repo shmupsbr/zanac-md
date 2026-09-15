@@ -175,11 +175,11 @@ def main() -> int:
         r"[\s\S]{0,80}?\)\s*return;",
         up,
     )
-    if not skip or "ebullet_normal_lock" not in skip.group(0):
-        return fail("matching (frame,15) skip must not apply under NORMAL lock")
-    if mentions_skill(up):
-        return fail("spr_upload_color must not consult skill")
-    print("  spr_upload_color: NORMAL paint_all every tick (recover poisoned 15)")
+    if not skip:
+        return fail("matching (frame,nibble) skip missing")
+    if "ebullet_normal_lock" in skip.group(0):
+        return fail("do not paint_all every tick under NORMAL (3+ volley slowdown)")
+    print("  spr_upload_color: matching skip; reuse own holds white")
 
     sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""
     if "ebullet_normal_lock" not in sync or "shot_vram_own" not in sync:
@@ -232,7 +232,7 @@ def main() -> int:
     ):
         return fail("do not reintroduce VDP_allocateTiles/releaseTiles")
 
-    print("ok: NORMAL red-box×3 white; all bosses white; HIGH still cycles")
+    print("ok: NORMAL red-box×3 white; bosses white discs; type 21 cycles; HIGH discs cycle")
     return 0
 
 

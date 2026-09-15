@@ -8,8 +8,8 @@ NORMAL = solid white+EC (0x8F / nibble 15) for every enemy and every
 boss, entire game, on every skill. No 8659, no PAL2[4] walk.
 HIGH   = 8659 colour-walk on the same shots, also independent of skill.
 
-Scope: FRAME_LEAD 20/37/38/41/42/43, FRAME_LIGHT_BAR 21, type 45
-bar/med. Boxes 3x38, k_gun, spawners, wide 84-86, base_fire 73-79.
+Scope: FRAME_LEAD 20/37/38/41/42/43, type 45 bar/med.
+Type 21 FRAME_LIGHT_BAR (`<===>`) is Japan 8659 always — not vis.
 
 This file must FAIL if any bolinha colour-walk can run without HIGH,
 FAIL if any forced-white bolinha path runs without NORMAL, and FAIL
@@ -43,7 +43,7 @@ WALK_RE = re.compile(
 WHITE_RE = re.compile(
     r"(?:(?:e|c|s)->sat_col\s*=\s*0x8F|spr_set_sat_col\s*\(\s*[ecs]\s*,\s*0x8F\s*\))"
 )
-BOLINHA = ("20", "21", "37", "38", "41", "42", "43", "45")
+BOLINHA = ("20", "37", "38", "41", "42", "43", "45")
 
 
 def fail(msg: str) -> int:
@@ -87,8 +87,10 @@ def main() -> int:
         return fail("HIGH must 8659-walk inside ebullet_apply_vis")
     if "spr_set_sat_col(e, 0x8F)" not in apply:
         return fail("NORMAL white must go through spr_set_sat_col (EC + upload)")
+    if "ebullet_light_bar" not in apply:
+        return fail("apply_vis must 8659 type 21 via ebullet_light_bar (not vis)")
     if "ebullet_bolinha" not in apply:
-        return fail("apply_vis must classify via ebullet_bolinha (no orphan types)")
+        return fail("apply_vis must classify discs/45 via ebullet_bolinha")
     print("  ebullet_apply_vis: HIGH walk / NORMAL 0x8F; vis only")
 
     boli = fn_span(ent, "static int ebullet_bolinha(const Slot *s)")
@@ -100,11 +102,20 @@ def main() -> int:
             and "ebullet_lead_disc" in boli
         ):
             return fail("ebullet_bolinha must include type %s" % v)
-    if "21" not in boli or "45" not in boli:
-        return fail("ebullet_bolinha must include type 21 and type 45")
+    if "21" in boli and "v == 21" in boli:
+        return fail("type 21 must not be a vis bolinha (Japan 8659 always)")
+    if "45" not in boli:
+        return fail("ebullet_bolinha must include type 45")
     if mentions_skill(boli):
         return fail("ebullet_bolinha must not consult skill/ALC")
-    print("  ebullet_bolinha: 20/21/37/38/41/42/43/45")
+    print("  ebullet_bolinha: 20/37/38/41/42/43/45 (not type 21)")
+
+    bar = fn_span(ent, "static int ebullet_light_bar(const Slot *s)")
+    if not bar or "21" not in bar:
+        return fail("ebullet_light_bar must be type 21")
+    if mentions_skill(bar):
+        return fail("ebullet_light_bar must not consult skill/ALC")
+    print("  ebullet_light_bar: type 21 always-cycle")
 
     high = fn_span(ent, "static int ebullet_bolinha_high(const Slot *s)")
     if not high:
@@ -114,8 +125,10 @@ def main() -> int:
     if mentions_skill(high):
         return fail("ebullet_bolinha_high must not consult skill/ALC")
     cram = fn_span(ent, "static int ebullet_cram_shot(const Slot *s)")
-    if not cram or "ebullet_bolinha_high" not in cram:
-        return fail("ebullet_cram_shot must be bolinha_high (PAL2[4] on HIGH only)")
+    if not cram or "ebullet_light_bar" not in cram:
+        return fail("ebullet_cram_shot must always CRAM type 21")
+    if "ebullet_bolinha_high" not in cram:
+        return fail("ebullet_cram_shot must be bolinha_high for discs/45")
     if mentions_skill(cram or ""):
         return fail("ebullet_cram_shot must not consult skill/ALC")
     print("  HIGH gate: bolinha_high → cram_shot; no skill")
@@ -237,9 +250,12 @@ def main() -> int:
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)")
     if not prep or "ebullet_normal_lock" not in prep:
         return fail("shot_vram_prepare must refuse the (FRAME_LEAD,15) skip under NORMAL")
-    if "return 0" not in prep.split("ebullet_normal_lock")[1][:80]:
-        return fail("NORMAL lock must return 0 from shot_vram_prepare (always paint_all)")
-    print("  shot_vram_prepare: NORMAL never skips paint_all")
+    lock_arm = prep.split("ebullet_normal_lock")[1][:500] if "ebullet_normal_lock" in prep else ""
+    if "shot_bank_lookup" not in lock_arm:
+        return fail("NORMAL lock must share a remembered (FRAME_LEAD,15) bank")
+    if "return 0" not in lock_arm:
+        return fail("NORMAL lock must return 0 on lookup miss (first paint_all)")
+    print("  shot_vram_prepare: share after paint_all-15; miss still paints")
 
     place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
     if "else\n                spr_upload_color(s)" in place or (
@@ -287,8 +303,11 @@ def main() -> int:
         r"[\s\S]{0,80}?\)\s*return;",
         up,
     )
-    if not skip or "ebullet_normal_lock" not in skip.group(0):
-        return fail("spr_upload_color matching-vram skip must refuse NORMAL lock")
+    if not skip:
+        return fail("spr_upload_color must skip DMA when (frame,nibble) already matches")
+    if "ebullet_normal_lock" in skip.group(0):
+        return fail("NORMAL lock must not force per-tick paint_all (3+ volley slowdown)")
+    print("  spr_upload_color: matching-vram skip (own-after-place holds white)")
     if "dma_nibble_defer" in up and "ebullet_bolinha" not in up[
         max(0, up.find("dma_nibble_defer") - 40) : up.find("dma_nibble_defer") + 80
     ]:
@@ -356,7 +375,7 @@ def main() -> int:
     if not want or "ebullet_cram_shot" not in want or "ebullet_bolinha" not in want:
         return fail("proj_tile_want must bank HIGH on 4 / NORMAL bolinha on 15")
     if "return 15" not in want:
-        return fail("NORMAL bolinha (incl. 21/45) must bank nibble 15")
+        return fail("NORMAL bolinha (discs/45) must bank nibble 15")
     up = fn_span(ent, "static void spr_upload_color(Slot *s)")
     if not up or "ebullet_bolinha" not in up:
         return fail("spr_upload_color must paint_all every bolinha")
@@ -384,6 +403,7 @@ def main() -> int:
     # Zero relationship: every colour helper ignores skill/ALC.
     colour_fns = (
         "static int ebullet_lead_disc(const Slot *s)",
+        "static int ebullet_light_bar(const Slot *s)",
         "static int ebullet_bolinha(const Slot *s)",
         "static int ebullet_bolinha_high(const Slot *s)",
         "static int ebullet_normal_lock(const Slot *s)",

@@ -222,14 +222,20 @@ def main() -> int:
         fails += 1
     else:
         print("  KEEP: type 21 init apply_vis")
-    if ent.count("spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)))") != 1:
-        fail("8659 must stay a single write (inside apply_vis)")
+    n8659 = ent.count("spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)))")
+    apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)") or ""
+    n_apply = apply.count("spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)))")
+    if n8659 != n_apply or n_apply < 1:
+        fail("8659 writes must live only inside apply_vis")
+        fails += 1
+    elif "ebullet_light_bar" not in apply:
+        fail("type 21 8659 must be ungated inside apply_vis")
         fails += 1
     elif "ebullet_bolinha_high" not in ent and "options_bullet_high" not in ent:
         fail("HIGH vis must gate bolinha 8659 on every skill")
         fails += 1
     else:
-        print("  KEEP: one 8659 in apply_vis; NORMAL white / HIGH gated")
+        print("  KEEP: 8659 only in apply_vis; type 21 always + HIGH discs")
 
     jump = fn_span(mapc, "static void cmd_script_jump(u8 cmd, const u8 *ops)")
     if not jump:
