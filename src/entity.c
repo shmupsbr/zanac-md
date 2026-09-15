@@ -673,11 +673,13 @@ static void spr_vis_playfield(Sprite *sp, s16 dx, s16 dy, int want_vis)
         s16 y0 = (s16)mode_y_off();
         s16 y1 = (s16)(y0 + 192);
 
-        /* TMS 192-line clip. Origin in a letterbox is off-screen.
-         * SAT Y 0xB8 draws at 200 and occupies 200-215; the bar is
-         * 208-223. Low-pri sprites are clipped by the high-pri bar
-         * for the overlapping 8px; hide only when fully past 192. */
-        if (dy + (s16)MODE_SPR_W <= y0 || dy >= y1)
+        /* TMS 192-line clip. MD letterboxes that into 224 (y0=16).
+         * A 16px box with y0-15 < dy < y0 still paints rows 0-15 —
+         * the black top bar. MSX had no bar, so that leak is port-only
+         * (shots / fire colour-cycle look like blinking dots). Hide
+         * primary and marker when the draw box intersects [0, y0) or
+         * [y1, 224). Collision / SAT stay on sim Y. */
+        if (dy < y0 || dy + (s16)MODE_SPR_W > y1)
             want_vis = 0;
         if (mode_hud_overlap(dx, MODE_SPR_W))
             want_vis = 0;

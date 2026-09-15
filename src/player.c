@@ -173,7 +173,9 @@ static void show_ship(int vis)
         if (dy < y0)
             dy = y0;
         cdy = (s16)(dy + 2);
-        if (dy + SHIP_H <= y0 || dy >= y1)
+        /* Clamp keeps the hull on the 192 (KEEP 0xB8 / Y+2). Hide
+         * white and black if a box still intersects a letterbox. */
+        if (dy < y0 || dy + SHIP_H > y1)
             vis = 0;
     }
     SPR_setVisibility(s_spr, vis ? VISIBLE : HIDDEN);
