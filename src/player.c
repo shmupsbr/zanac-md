@@ -52,6 +52,9 @@ static u32 s_score;
 static u8  s_e111;
 static u8  s_e112;
 static u8  s_e113;
+/* Finite PLAYER EXTEND grants this run (ONCE / TWICE). Stock bump
+ * modes keep E111-E113 and leave this at 0. */
+static u8  s_extend_grants;
 /* Gameplay flags E102. Bit2 mutes ev8/ev9 (0x4A5D / 0x4A1C). */
 static u8  s_e102;
 /* E106-E108 top score. cold_start seeds E107=0x10 -> 100000.
@@ -230,6 +233,8 @@ static void fire_reset(void)
     fire_select(0);
 }
 
+static void hiscore_check(void);
+
 static void respawn(void)
 {
     place_start();
@@ -271,10 +276,21 @@ void player_init(void)
     s_e111 = 0;
     s_e112 = 0x20;
     s_e113 = 0;
+    s_extend_grants = 0;
     s_e102 = 0;
     s_e114 = 0;
     s_e148 = 0;
     s_e14f = 0;
+    /* NO EXTENDS: flat 500000 on the placar at game start. Do not
+     * apply the +100% again (that would turn it into 1M). Life
+     * grants stay off in this mode. */
+    if (options_extend() == EXTEND_NONE)
+    {
+        s_score = EXTEND_NONE_START;
+        if (s_score > 999999UL)
+            s_score = 999999UL;
+        hiscore_check();
+    }
 
     PAL_setPalette(PAL2, a->ship->palette->data, CPU);
     s_sat_col = 0x8F;
@@ -550,19 +566,32 @@ static void bump_extra_life_threshold(void)
     (void)c_daa;
 }
 
-/* 0x4A26: 3-byte BCD score >= E111/E112/E113, then 0x4A52 extra life. */
+/* Decode current E111-E113 (E103 units). Init 0x20 → 2000. */
+static u32 stock_extend_thresh(void)
+{
+    return (u32)bcd_bin(s_e111)
+         + (u32)bcd_bin(s_e112) * 100UL
+         + (u32)bcd_bin(s_e113) * 10000UL;
+}
+
+/* 0x4A26: score vs PLAYER EXTEND schedule, then 0x4A52 extra life.
+ * EVERY X is stock E111-E113 bump. EVERY 2X/3X reuse that bump and
+ * compare against 2×/3× the stock threshold. ONCE/TWICE fire at
+ * aX / 2·aX only. NO EXTENDS never grants. */
 static void extra_life_check(void)
 {
     u32 thresh;
 
     for (;;)
     {
-        thresh = (u32)bcd_bin(s_e111)
-               + (u32)bcd_bin(s_e112) * 100UL
-               + (u32)bcd_bin(s_e113) * 10000UL;
-        if (s_score < thresh)
+        thresh = options_extend_threshold(stock_extend_thresh(),
+                                          s_extend_grants);
+        if (!thresh || s_score < thresh)
             return;
-        bump_extra_life_threshold();
+        if (options_extend_uses_stock_bump())
+            bump_extra_life_threshold();
+        else
+            s_extend_grants++;
         /* INC E10A; wrap -> DEC and RET (no ev8, no re-loop). */
         s_lives++;
         if (s_lives == 0)
@@ -636,15 +665,34 @@ u32 player_award_points(u8 idx)
     return k_award[idx];
 }
 
-void player_add_score(u8 award_idx)
+u32 player_clear_bonus_points(u8 idx)
 {
-    if (award_idx > 20)
-        award_idx = 20;
-    s_score += k_award[award_idx];
+    return options_apply_score_bonus(
+        options_scale_clear_bonus(player_award_points(idx)));
+}
+
+static void add_points(u32 pts)
+{
+    /* Extend % lands on the placar so extra_life_check sees it. */
+    s_score += options_apply_score_bonus(pts);
     if (s_score > 999999UL)
         s_score = 999999UL;
     extra_life_check();
     hiscore_check();
+}
+
+void player_add_score(u8 award_idx)
+{
+    if (award_idx > 20)
+        award_idx = 20;
+    add_points(k_award[award_idx]);
+}
+
+void player_add_clear_bonus(u8 award_idx)
+{
+    if (award_idx > 20)
+        award_idx = 20;
+    add_points(options_scale_clear_bonus(k_award[award_idx]));
 }
 
 void player_update(void)

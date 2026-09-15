@@ -1929,6 +1929,19 @@ static int hit_overlap(s16 x1, s16 y1, u8 sat1, s16 x2, s16 y2, u8 sat2)
  * (8f25/8a5a). That 0-7px vs art is MD VDP != TMS, not a missing store.
  * Wreck stamps bind with scroll_px&~7 and then ride the same VSCROLL as
  * the live tiles, so the punch is not crooked vs the nametable. */
+/* Japan SAT names for KIND_EBULLET. Colour-cycle +04 (21 8659 / xor_cram)
+ * is draw-only — 4560 still uses SAT X/Y and sat_name. */
+static u8 ebullet_sat_name(const Slot *e)
+{
+    u8 t = (u8)(e->variant & 0x7F);
+
+    if (t == 21)
+        return 0x18;            /* 863b light bar pat 6 */
+    if (t == 45)
+        return e->sat ? e->sat : (u8)0x18;  /* 8625 0x18 / 0x20 pulse */
+    return 0x1C;                /* 84eb / 8672 lead pat 6 */
+}
+
 static int hit_overlap_slot(s16 x1, s16 y1, u8 sat1, const Slot *e)
 {
     u8 esat;
@@ -1937,6 +1950,8 @@ static int hit_overlap_slot(s16 x1, s16 y1, u8 sat1, const Slot *e)
      * (plane 14x12) and do not keep leftover type-61 SAT 0xF8 (12x16). */
     if (e->kind == KIND_RISER)
         esat = 0;
+    else if (e->kind == KIND_EBULLET)
+        esat = ebullet_sat_name(e);
     else
         esat = e->sat ? e->sat : (u8)0x40;
 
@@ -2021,6 +2036,20 @@ static u8 post_flags(u8 t)
         return POST_SHOT;
     /* full entity_post 44BA (airborne, type21/36/44/45, guns, ...) */
     return (u8)(POST_SHOT | POST_SHIP);
+}
+
+/* Japan 44A6 (84fe/85c9/869b) and 44BA (8659/8608): these ebullets
+ * CALL check_hit_player. sat_col walk / letterbox hide / init-RET
+ * must not drop POST_SHIP. */
+static int ebullet_hits_player(const Slot *e)
+{
+    u8 t;
+
+    if (e->kind != KIND_EBULLET)
+        return 0;
+    t = (u8)(e->variant & 0x7F);
+    return (t == 20 || t == 21 || t == 37 || t == 38
+        || t == 41 || t == 42 || t == 43 || t == 45);
 }
 
 /* Shot AABB gate. 44A6 leads/fragments are unshootable only as KIND_EBULLET.
@@ -6415,10 +6444,13 @@ static void collide_player(void)
          * 0x83 is TMS 3 light green — the green flyer. Do not skip it
          * as 44CA; that let the plane pass through the ship. */
         /* 0x453E path: only types on a ship leg (44BA/44B0/44A6) count.
-         * Shots-only structures (44CA) and no-post types are ignored. */
+         * Shots-only structures (44CA) and no-post types are ignored.
+         * Colour-cycle +04, xor_cram, letterbox sprite hide, and the
+         * ebullet spawn-visit 4898 skip are draw / init only — they
+         * must not gate check_hit_player. */
         et = slot_msx_type(e);
         pf = post_flags(et);
-        if (!(pf & POST_SHIP))
+        if (!(pf & POST_SHIP) && !ebullet_hits_player(e))
             continue;
         {
             /* 4560 SAT vs SAT. Type 44 uses SAT 0x40 (14x12) like 45A0. */

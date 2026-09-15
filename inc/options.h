@@ -37,14 +37,45 @@
 #define OPTIONS_SHIPS_MIN       1
 #define OPTIONS_SHIPS_MAX       5
 
+/*
+ * PLAYER EXTEND. First stock threshold is title_screen_init
+ * E111=0, E112=0x20, E113=0 → 2000 in E103-E105 units. HUD 0x49B5
+ * prints those 6 digits plus a trailing 0, so the placar reads 20000.
+ * Call that displayed first extra  X. Modes control extra_life_check
+ * (when / how often lives are granted). The % is a score bonus on
+ * every placar add — compensation for a harder extend schedule, not
+ * a substitute for the life rules. ONCE > TWICE at each tier.
+ * NO EXTENDS is +100% plus EXTEND_NONE_START at player_init.
+ * Default EVERY X = stock lives + 0%.
+ */
+#define EXTEND_X_POINTS         2000UL
+#define EXTEND_X_DISPLAY        20000UL
+/* NO EXTENDS: +100% on every placar add, plus this flat grant at
+ * player_init / game start (not doubled by the %). */
+#define EXTEND_NONE_START       500000UL
+
+#define EXTEND_EVERY_X          0
+#define EXTEND_EVERY_2X         1
+#define EXTEND_EVERY_3X         2
+#define EXTEND_X_ONCE           3
+#define EXTEND_X_TWICE          4
+#define EXTEND_2X_ONCE          5
+#define EXTEND_2X_TWICE         6
+#define EXTEND_3X_ONCE          7
+#define EXTEND_3X_TWICE         8
+#define EXTEND_NONE             9
+#define EXTEND_MODE_MAX         EXTEND_NONE
+
 u8   options_skill(void);
 u8   options_autofire(void);
 u8   options_player_ships(void);
+u8   options_extend(void);
 u8   options_bind(u8 btn);
 
 void options_nudge_skill(s8 dir);
 void options_nudge_autofire(s8 dir);
 void options_nudge_ships(s8 dir);
+void options_nudge_extend(s8 dir);
 void options_cycle_bind(u8 btn, s8 dir);
 
 /* Easy: cap effective pos at ALC_HALF_RANK. Hard/Normal: unchanged. */
@@ -58,6 +89,21 @@ u8   options_shot_period(void);
 /* Scale armed boss TIME (E155 BCD minutes). Easy ×1.5, Hard ×0.5
  * (min 1 if the script value was non-zero). Normal unchanged. */
 u8   options_scale_time(u8 e155);
+
+/* Boss/base clear / TIME-window 0x9302 awards only (not per-kill 4a6a).
+ * Easy 50% of Normal, Hard +100% (double). Normal unchanged. */
+u32  options_scale_clear_bonus(u32 pts);
+
+/* PLAYER EXTEND score bonus, applied to every placar add. */
+u8   options_extend_bonus_pct(void);
+u32  options_apply_score_bonus(u32 pts);
+
+/* 1 if this mode still uses stock E111-E113 bump after a grant. */
+u8   options_extend_uses_stock_bump(void);
+/* Next extra-life score (E103 units), or 0 if no further extends.
+ * stock_thresh is the current E111-E113 decode; grants is how many
+ * finite-mode lives this run already awarded. */
+u32  options_extend_threshold(u32 stock_thresh, u8 grants);
 
 /* Physical A/B/C → fire roles. Defaults: A both, B primary, C secondary. */
 u16  options_primary_buttons(void);

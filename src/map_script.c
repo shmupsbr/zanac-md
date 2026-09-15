@@ -3159,7 +3159,7 @@ static void bonus_draw(u8 award_idx)
     if (mode_get() != MODE_ORIGINAL)
         return;
 
-    format_bonus_score(score, player_award_points(award_idx));
+    format_bonus_score(score, player_clear_bonus_points(award_idx));
     /* 0x3966 "BONUS" (row 11 col 6); 0x396B is 0x49B5 (col 11). */
     hud_draw_str(BG_A, 6, mode_text_row(11), "BONUS");
     hud_draw_str(BG_A, 11, mode_text_row(11), score);
@@ -3175,8 +3175,10 @@ void map_script_base_cleared(void)
     if (idx >= 0x10)
         player_e102_set(0x04);
     if (award)
-        player_add_score(award);
-    /* 0x9183: print before/with 0x91C1 add_score. Bit6 still prints 0 pts. */
+        player_add_clear_bonus(award);
+    /* 0x9183: print before/with 0x91C1 add_score. Bit6 still prints 0 pts.
+     * Skill (Easy half / Hard double) and PLAYER EXTEND % are already
+     * in player_clear_bonus_points so the banner matches the placar. */
     bonus_draw(award);
     map_script_resume_scroll();
 }
