@@ -347,20 +347,15 @@
 #define KIND_FIRE       3
 /* Fire 0/1/2/7 72de owns PAL2[13]. Shot-bank keys use the same index. */
 #define FIRE7_CRAM_NIB  13
-/* Type 21 8659 colour-walk. Pat 6 is a short 15x5 bar. Bind every
- * nonzero body nibble to PAL2[4] once and cycle CRAM so bars share one
- * shot-bank key. Do not verbatim-DMA baked-4: SGDK may pack the index
- * off 4 onto 15 (TMS white), and PAL2[4] then pulses while the shot
- * stays white.
- * Pat 7 FRAME_LEAD (types 20/37/38/41/42/43) is the common small
- * bolinha. Japan init +04 is 0x8F (TMS white, EC). BULLET VISIBILITY
- * (not skill / ALC) owns the colour: NORMAL keeps that white lock on
- * every skill; HIGH restores the #136 PAL2[4] walk on those discs
- * only, including type 20/41 which have their own update arms.
- * Type 21 FRAME_LIGHT_BAR is the Easy-rank gun/base "tiro" (#138
- * left it always-on 8659, so Easy+NORMAL still cycled). Same vis
- * gate: NORMAL white+EC, HIGH 8659. Type 45 stays 0x8F size-pulse.
- * XOR walkers stay on nibble 2 (tests forbid 4 in k_xor_cram_nib). */
+/* Every tiro bolinha (FRAME_LEAD 20/37/38/41/42/43, FRAME_LIGHT_BAR
+ * 21, type 45 bar/med pulse) shares one vis switch. NORMAL = Japan
+ * 0x8F / baked 15 white+EC, no 8659, no PAL2[4] walk. HIGH = #136
+ * PAL2[4] 8659 R-nibble|0x80 on all of them (boxes, edge guns,
+ * both bosses, horizontals). Skill / ALC never enter.
+ * Bind every nonzero body nibble to PAL2[4] once on HIGH so bars
+ * and discs share one shot-bank key. Do not verbatim-DMA: SGDK may
+ * pack 15 onto 4 (leads cycle on NORMAL) or 4 onto 15 (bars stay
+ * white while PAL2[4] pulses). XOR walkers stay on nibble 2. */
 #define LIGHTBAR_CRAM_NIB  4
 #define KIND_BOX        4
 #define KIND_DUSTER     10
@@ -773,7 +768,7 @@ static int shot_art_shareable(const Slot *s)
             || s->kind == KIND_EBULLET);
 }
 
-/* Pat 7 disc (20/37/38/41/42/43). Not type 21 bar, not type 45 pulse. */
+/* Pat 7 disc (20/37/38/41/42/43). Collision / SAT name (44A6). */
 static int ebullet_lead_disc(const Slot *s)
 {
     u8 v;
@@ -785,32 +780,33 @@ static int ebullet_lead_disc(const Slot *s)
             || v == 41 || v == 42 || v == 43);
 }
 
-/* OPTIONS BULLET VISIBILITY only. Skill / ALC never enter this:
- * Easy / Normal / Hard must not gate or override white vs cycle.
- * NORMAL = Japan 0x8F / baked 15. HIGH = #136 PAL2[4] 8659 walk.
- * Type 20 (stream homing) and type 41 (pair fragment) have their
- * own update_enemies arms — they must use this same helper. */
-static int ebullet_lead_high(const Slot *s)
+/* Every on-screen tiro bolinha: lead discs, type 21 light-bar, type 45
+ * bar/med pulse. Boxes (3x type 38), edge guns (k_gun 21/38),
+ * spawners, wide 84-86, both bosses (73-79 fire 21/38/42/43/45).
+ * Prefer over-including a bolinha-like shot over another Easy cycler. */
+static int ebullet_bolinha(const Slot *s)
 {
-    return ebullet_lead_disc(s) && options_bullet_high();
+    u8 v;
+
+    if (ebullet_lead_disc(s))
+        return 1;
+    if (s->kind != KIND_EBULLET)
+        return 0;
+    v = (u8)(s->variant & 0x7F);
+    return (v == 21 || v == 45);
 }
 
-/* Type 21 bar owns PAL2[4] CRAM (8659 walk, one bank key) only on
- * HIGH vis. Easy k_gun 48/49/52-55 and type-73 base_fire spawn this
- * bar; #138 left 8659 always-on so Easy+NORMAL still colour-cycled.
- * Skill / ALC never enter: same helper family as ebullet_lead_high.
- * Lead discs: HIGH vis (any skill) shares that nibble; NORMAL stays
- * baked 15. */
-static int ebullet_type21(const Slot *s)
+/* OPTIONS BULLET VISIBILITY only. Skill / ALC never enter:
+ * Easy / Normal / Hard must not gate or override white vs cycle. */
+static int ebullet_bolinha_high(const Slot *s)
 {
-    return (s->kind == KIND_EBULLET && (u8)(s->variant & 0x7F) == 21);
+    return ebullet_bolinha(s) && options_bullet_high();
 }
 
+/* HIGH vis: PAL2[4] 8659 walk. NORMAL: not a CRAM shot (white lock). */
 static int ebullet_cram_shot(const Slot *s)
 {
-    if (ebullet_lead_high(s))
-        return 1;
-    return ebullet_type21(s) && options_bullet_high();
+    return ebullet_bolinha_high(s);
 }
 
 static u8 proj_tile_want(const Slot *s)
@@ -818,13 +814,13 @@ static u8 proj_tile_want(const Slot *s)
     u8 baked;
     u8 want;
 
-    /* Type 21 keys the bank on PAL2[4] even before xor_cram_bind
-     * when HIGH. Leftover sat_col 0x8F (previous lead) would otherwise
-     * bank (LIGHT_BAR, 15) and leave 8659 cycling an unused CRAM slot.
-     * NORMAL type 21 and lead discs bank on baked 15 (TMS white). */
+    /* HIGH bolinhas key the bank on PAL2[4] even before xor_cram_bind.
+     * Leftover sat_col 0x8F would otherwise bank (frame, 15) and leave
+     * 8659 cycling an unused CRAM slot. NORMAL every bolinha (leads,
+     * type 21 bar, type 45 pulse) banks on baked 15 (TMS white). */
     if (ebullet_cram_shot(s))
         return LIGHTBAR_CRAM_NIB;
-    if (ebullet_lead_disc(s) || ebullet_type21(s))
+    if (ebullet_bolinha(s))
         return 15;
     if (s->cram_nib)
         return s->cram_nib;
@@ -1696,7 +1692,7 @@ static void spr_upload_color(Slot *s)
      * primary+black at the same draw (Y-0x11 / same X). */
     if (ebullet_cram_shot(s))
         want = LIGHTBAR_CRAM_NIB;
-    else if (ebullet_lead_disc(s) || ebullet_type21(s))
+    else if (ebullet_bolinha(s))
         want = 15;              /* Japan +04 0x8F / TMS white, stuck */
     else if (s->cram_nib)
         want = s->cram_nib;
@@ -1743,14 +1739,12 @@ static void spr_upload_color(Slot *s)
     {
         u8 disc = (u8)(s->kind == KIND_EXPL || s->kind == KIND_PDEAD
                        || s->kind == KIND_HUSK);
-        /* Type 21 CRAM: paint every nonzero nibble onto PAL2[4]. A
-         * want==baked verbatim upload leaves SGDK-packed index 15
-         * (white) in VRAM while 8659 cycles the unused PAL2[4].
-         * Lead discs: SGDK may pack baked 15 off 15 onto 4, so a
-         * verbatim DMA would share PAL2[4] with type 21 and cycle
-         * on NORMAL. paint_all onto 15 isolates the white lock. */
-        u8 paint_bar = (u8)(ebullet_cram_shot(s) || ebullet_lead_disc(s)
-                            || ebullet_type21(s));
+        /* HIGH: paint every nonzero nibble onto PAL2[4]. A want==baked
+         * verbatim upload leaves SGDK-packed index 15 (white) in VRAM
+         * while 8659 cycles the unused PAL2[4] (type 21) or packed 4
+         * (leads share PAL2[4] and cycle on NORMAL). paint_all onto 15
+         * isolates the white lock; onto 4 enables the walk. */
+        u8 paint_bar = (u8)ebullet_bolinha(s);
 
         /* Verbatim tiles: queue ROM/FAR src. Skip the 128-byte copy
          * into a DMA scratch (and do not allocateAndQueue an unused buf). */
@@ -1815,6 +1809,21 @@ static void spr_set_sat_col(Slot *s, u8 col)
     s->sat_col = col;
     if (s->spr && s->spr->frame)
         spr_upload_color(s);
+}
+
+/* One colour path for every tiro bolinha. Call from every arming
+ * (init_frag / spawn_lead20 / spawn_ebullet_dir / stream 20) and every
+ * per-frame 8659 site (type 20, 21/37/38/42/43/45, 41, init_ret).
+ * NORMAL: force 0x8F white+EC, no walk. HIGH: 8659 R-nibble|0x80.
+ * Skill / ALC never enter. */
+static void ebullet_apply_vis(Slot *e)
+{
+    if (!ebullet_bolinha(e))
+        return;
+    if (options_bullet_high())
+        spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+    else
+        spr_set_sat_col(e, 0x8F);
 }
 
 static void spr_place(Slot *s, u16 frame)
@@ -2813,7 +2822,7 @@ static void spawn_ebullet_dir(s16 x, s16 y, u8 dir)
     e->y = y;
     apply_dir(e, dir);
     e->alive = 1;
-    e->sat_col = 0x8F;          /* 84eb type37 +04; TMS EC bit7 */
+    ebullet_apply_vis(e);        /* vis owns +04; Japan 84eb is 0x8F */
     spr_place(e, FRAME_LEAD);
     /* 84fa RET: same first-visit skip as init_frag variant 37. */
     {
@@ -3642,7 +3651,7 @@ static void spawn_lead20(s16 x, s16 y)
     c->alive = 1;
     c->cram_nib = 0;
     c->cram_col = 0;
-    c->sat_col = 0x8F;          /* 8672 +04; TMS EC bit7 */
+    ebullet_apply_vis(c);        /* vis owns +04; Japan 8672 is 0x8F */
     spr_place(c, FRAME_LEAD);
 }
 
@@ -4183,16 +4192,12 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
         e->hp = 3;
         e->aux = (u8)((speed << 4) | (dir & 15));
         e->clock = 0x28;
-        e->sat_col = 0x8F;          /* 850b +04; pulse is size not color */
         apply_dir_88(e, (u8)(dir & 15), speed);
     }
     e->alive = 1;
-    /* 20/37/38/41/42/43: +04=0x8F (8672/84eb/8513/8539). Type 21 Japan
-     * 863b does not write +04 (active 8659 is R-nibble|0x80). NORMAL
-     * vis must still arm EC+white or the bar draws 32px right of SAT
-     * X and Easy k_gun 21 keeps colour-walking via leftover CRAM. */
-    if (variant != 21 || !options_bullet_high())
-        e->sat_col = 0x8F;
+    /* Japan 863b: type 21 writes no +04 (variant != 21 was 0x8F).
+     * Vis helper owns every bolinha: NORMAL 0x8F, HIGH 8659. */
+    ebullet_apply_vis(e);
     /* 21: SAT 0x18 pat 6. 45: 850b writes 0x1C then 8625 pulses 0x18/0x20. */
     spr_place(e, (variant == 21 || variant == 45) ? FRAME_LIGHT_BAR : FRAME_LEAD);
     /* 37 84fa / 38 8524 / 41 857e / 21 8656: SET 7 RET.
@@ -5064,39 +5069,34 @@ static void spawner_step(Slot *e)
 }
 
 /* 8c15 olhinho is the 8948 cell (SAT Y before 8a7d +0x10, X before
- * 8ac7 xo/yo). Live SAT after arm is 16px south of that lens — 8ddb
- * copies IX+01/+02 so Japan also fires from the hitbox, which on MD
- * reads as the bottom of the nametable sprite. Undo the arm transform
- * and sit on the lens centre. Collision stays on live SAT. */
+ * 8ac7 xo/yo). Live SAT after arm is 16px south of that lens.
+ * FRAME_LEAD / LIGHT_BAR are 16x16 sprites whose disc/bar centroid
+ * is ~(8,8) (objs.png LEAD 7.5,8; LIGHT_BAR 7,7). Sitting SAT on
+ * the lens centre (#139) left the graphic 8px down-right of the
+ * red eye — still "near the olhinhos". SAT = lens_centre - (8,8)
+ * so the visible disc leaves the lens centre. Collision stays on
+ * live SAT. */
 static void base_muzzle(const Slot *e, s16 *x, s16 *y)
 {
     u8 idx = (u8)(e->variant - 73);
     u8 xo;
     u8 yo;
-    u8 cx;
-    u8 cy;
 
     if (idx > 6)
         idx = 0;
     yo = k_base[idx][2];
     xo = k_base[idx][3];
-    /* u8 like 8a7d / 8ac7. */
+    /* u8 like 8a7d / 8ac7 → 8948 cell origin (NT tile top-left). */
     *x = (s16)(u8)((u8)e->x - xo);
     *y = (s16)(u8)((u8)e->y - yo - 0x10);
-    /* 73/74 8c15 is 2x2 (16x16); 75-78 are one 8x8 0xBF+phase lens.
-     * Type 79 skips 8c15; same 8x8 centre on the bind cell. */
-    if (e->variant == 73 || e->variant == 74)
+    /* 73/74 8c15 is 2x2 (centroid ~8,8); disc (8,8) → SAT = origin.
+     * 75-78 8x8 0xC2 centroid (3.5,3.5); type 79 skips 8c15, same
+     * 8x8 bind cell. SAT = origin + (4,4) - (8,8) = origin - 4. */
+    if (e->variant != 73 && e->variant != 74)
     {
-        cx = 8;
-        cy = 8;
+        *x = (s16)(u8)((u8)*x - 4);
+        *y = (s16)(u8)((u8)*y - 4);
     }
-    else
-    {
-        cx = 4;
-        cy = 4;
-    }
-    *x = (s16)(u8)((u8)*x + cx);
-    *y = (s16)(u8)((u8)*y + cy);
 }
 
 static void base_fire(Slot *e)
@@ -5506,7 +5506,7 @@ static int spawn_from_type(u8 t)
         e->alive = 1;
         e->cram_nib = 0;
         e->cram_col = 0;
-        e->sat_col = 0x8F;      /* 8672 +04; TMS EC bit7 */
+        ebullet_apply_vis(e);        /* vis owns +04; Japan 8672 is 0x8F */
         spr_place(e, FRAME_LEAD);
     }
     else if (t == 56)
@@ -6335,8 +6335,11 @@ static void update_enemies(void)
         {
             /* 84fa / 8524 / 857e / 8656: SET 7 RET.
              * 42/43 85ed: XOR then RET (type already 0xA5/0xA6). No 4898,
-             * no 8659, no 857f DEC +15. SAT stays at spawn XY this visit. */
+             * no 857f DEC +15. SAT stays at spawn XY this visit.
+             * Colour still goes through ebullet_apply_vis so HIGH does
+             * not skip a white frame and NORMAL cannot leftover-walk. */
             s_ebullet_init_ret[i] = 0;
+            ebullet_apply_vis(e);
             spr_sync_proj(e);
             continue;
         }
@@ -6346,13 +6349,10 @@ static void update_enemies(void)
              * Y_homing_sub 0x4942: tgt +13=0xFF, accel +15=0x0C, B=+17=1.
              * Then 4898 u8 8.8 wrap-cull Y>=0xD0 / X>=0xD1 (type45 extra-threat
              * hole: s32 X lived past 0xD1; Y wrap re-entered).
-             * Colour is BULLET VISIBILITY (ebullet_lead_high), not skill.
-             * #137 gated 37/38/42/43 only; this arm kept the #136 8659
-             * so Easy/Normal stream leads still cycled on NORMAL vis. */
+             * Colour is BULLET VISIBILITY (ebullet_apply_vis), not skill. */
             if ((u8)e->y != 0xFF)
                 e->bind = (u16)(e->bind + 0x000C);
-            if (ebullet_lead_high(e))
-                spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+            ebullet_apply_vis(e);
             if (step_88_4898(e))
                 continue;
             spr_sync_proj(e);
@@ -6366,24 +6366,14 @@ static void update_enemies(void)
              * bind=Yvel, script/timer fracs. Keep apply_dir_88.
              * u8 wrap + 4898 Y>=0xD0 / X>=0xD1 (same as luster 17/18).
              * Type 21 active 8659: LD A,R / AND 0x0F / OR 0x80 / +04 then
-             * 4898 / 44ba. Init 863b still writes no +04 on HIGH (Japan).
-             * NORMAL vis writes +04=0x8F at init and skips 8659 so Easy
-             * k_gun / type-73 bars stay white+EC. spr_kill zeros sat_col;
-             * without +04/8659 EC never arms and the bar draws 32px
-             * right of SAT X.
-             * Lead discs (37/38/42/43): Japan init +04=0x8F, no 8659.
-             * Default play keeps that white lock (baked nibble 15).
+             * 4898 / 44ba. spr_kill zeros sat_col; without +04/8659 EC
+             * never arms and the bar draws 32px right of SAT X.
              * Type 45 (0x8608): DEC clock/+0x1c before 4898; on 0: R bit0 ?
              * dir += (R&8)-4 + apply_dir_88(speed) : reload 0x28 then DEC (0x27).
-             * 8625: SAT +03 = 0x18 + ((clock&1)<<3) every active frame. */
-            /* 8659 R-nibble|0x80. Type 21 and lead discs: NORMAL white
-             * on every skill (options_bullet_high only — Easy cannot
-             * bypass); HIGH restores the #136 walk. Type 45 stays
-             * 0x8F size-pulse. */
-            if (e->variant == 21 && options_bullet_high())
-                spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
-            else if (ebullet_lead_high(e))
-                spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+             * 8625: SAT +03 = 0x18 + ((clock&1)<<3) every active frame.
+             * Colour: ebullet_apply_vis — NORMAL white+EC, HIGH 8659,
+             * including type 45 (bolinha-like bar/med). Skill never enters. */
+            ebullet_apply_vis(e);
             if (e->variant == 45)
             {
                 if (e->clock)
@@ -6432,10 +6422,8 @@ static void update_enemies(void)
                     heading = (u8)((heading + 1) & 15);
             }
             e->aux = (u8)((count << 5) | (meta & 0x10) | heading);
-            /* Same vis gate as type 20 / 37/38/42/43. Skill must not
-             * leave this pair-fragment 8659 running on NORMAL. */
-            if (ebullet_lead_high(e))
-                spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+            /* Same vis helper as type 20 / 21/37/38/42/43/45. */
+            ebullet_apply_vis(e);
             hd = (u8)(heading & 15);
             ih = (u8)((seed & 0x10)
                 ? ((seed + 0xFC) & 15)
@@ -7156,9 +7144,9 @@ static u8 xor_cram_alloc(const Slot *s)
 
     if (!k)
         return 0;
-    /* Type 21 bars always bind PAL2[4] (LIGHT_BAR bake). Do not sit in
-     * the XOR walker pool — nibble 2 is exclusive-per-kind and would
-     * miss when SIG/FLASH already owns it. Lead discs stay white. */
+    /* HIGH bolinhas bind PAL2[4]. Do not sit in the XOR walker pool —
+     * nibble 2 is exclusive-per-kind and would miss when SIG/FLASH
+     * already owns it. */
     if (ebullet_cram_shot(s))
     {
         s_bar_cram_refs++;
@@ -7198,7 +7186,7 @@ static int xor_cram_wanted(const Slot *s)
      * tileset and looks like fire-0 colour rotate + broken frames.
      * Type 67 83d8 is SAT ^=0x34 (0x20<->0x14) AND colour ^=0x0c:
      * remap_cache per frame, not this pool. Type 45 8625 bar/med is
-     * KIND_EBULLET variant 45, not 21.
+     * a bolinha: HIGH vis CRAM-binds like type 21; NORMAL stays white.
      * Solid dual-SAT flyers (luster 16-18, stealth 34/65/66, sart 61)
      * keep one TMS nibble. Binding them made PAL2[5/6] walk. */
     if (s->kind == KIND_LUSTER || s->kind == KIND_STEALTH
@@ -7238,7 +7226,7 @@ static void xor_cram_paint(Slot *s, u8 nib)
     /* Retarget onto a (frame, nibble) bank when one exists. Do not skip
      * the paint: a prior want==baked upload can sit on nibble 15 while
      * the bank key says 4. fresh_auto fail (vram_nib != nib) leaves the
-     * leftover slot alone so we do not overwrite type 45's white bar. */
+     * leftover slot alone so we do not overwrite a NORMAL white bar. */
     if (shot_vram_prepare(s, nib, (u8)ts->numTile) && s->vram_nib != nib)
         return;
     vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);

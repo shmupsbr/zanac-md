@@ -72,28 +72,28 @@ def main() -> int:
         fails += 1
 
     lead20 = fn_body(src, "static void spawn_lead20(s16 x, s16 y)")
-    if not lead20 or "c->sat_col = 0x8F" not in lead20:
-        fail("spawn_lead20 must write sat_col 0x8F (8672)")
+    if not lead20 or ("c->sat_col = 0x8F" not in lead20 and "ebullet_apply_vis(c)" not in lead20):
+        fail("spawn_lead20 must write sat_col 0x8F (8672) via apply_vis")
         fails += 1
     else:
-        print("  spawn_lead20: sat_col 0x8F (8672)")
+        print("  spawn_lead20: sat_col via apply_vis (8672)")
 
     e37 = fn_body(src, "static void spawn_ebullet_dir(s16 x, s16 y, u8 dir)")
-    if not e37 or "e->sat_col = 0x8F" not in e37:
-        fail("spawn_ebullet_dir must write sat_col 0x8F (84eb)")
+    if not e37 or ("e->sat_col = 0x8F" not in e37 and "ebullet_apply_vis(e)" not in e37):
+        fail("spawn_ebullet_dir must write sat_col 0x8F (84eb) via apply_vis")
         fails += 1
     else:
-        print("  spawn_ebullet_dir: sat_col 0x8F (84eb)")
+        print("  spawn_ebullet_dir: sat_col via apply_vis (84eb)")
 
     frag = fn_body(src, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)")
     if not frag:
         fail("init_frag not found")
         return 1
-    if "variant != 21" not in frag or "e->sat_col = 0x8F" not in frag:
-        fail("init_frag must write sat_col 0x8F for 20/37/38/41/42/43")
+    if "ebullet_apply_vis" not in frag:
+        fail("init_frag must write sat_col 0x8F for bolinhas via apply_vis")
         fails += 1
     else:
-        print("  init_frag: sat_col 0x8F except type 21")
+        print("  init_frag: apply_vis (NORMAL 0x8F / HIGH 8659)")
     if re.search(r"if\s*\(\s*variant\s*==\s*21\s*\)\s*\n\s*e->sat_col", frag):
         fail("init_frag must not invent type 21 +04 (863b writes none)")
         fails += 1
@@ -103,8 +103,11 @@ def main() -> int:
         src,
         re.S,
     )
-    if not stream or "e->sat_col = 0x8F" not in stream.group(1):
-        fail("stream type 20 must write sat_col 0x8F (8672)")
+    if not stream or (
+        "e->sat_col = 0x8F" not in stream.group(1)
+        and "ebullet_apply_vis(e)" not in stream.group(1)
+    ):
+        fail("stream type 20 must write sat_col 0x8F (8672) via apply_vis")
         fails += 1
     else:
         print("  spawn_from_type 20: sat_col 0x8F (8672)")

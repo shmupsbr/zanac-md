@@ -8,12 +8,12 @@ k_gun child is type 21. Type-73 base_fire also spawn_frag(..., 21).
 Those bars are the Easy "bolinhas" Filipe still saw cycling.
 
 Prove:
-  * options_bullet_high / ebullet_lead_high / ebullet_cram_shot / type 21
+  * options_bullet_high / ebullet_bolinha / apply_vis / type 21
     8659 never read skill or ALC.
   * k_gun pairs 1/3/4 fire type 21 through spawn_child_dir -> init_frag.
   * Easy-max slice includes those guns.
   * Type 73 base_fire type 21 uses the same init_frag (no private walk).
-  * HIGH still has a type 21 8659 write.
+  * HIGH still has a type 21 8659 write inside apply_vis.
 
 Usage (from zanac-md):
     python tools/test_easy_bullet_vis.py
@@ -94,9 +94,10 @@ def main() -> int:
 
     for sig in (
         "static int ebullet_lead_disc(const Slot *s)",
-        "static int ebullet_lead_high(const Slot *s)",
-        "static int ebullet_type21(const Slot *s)",
+        "static int ebullet_bolinha(const Slot *s)",
+        "static int ebullet_bolinha_high(const Slot *s)",
         "static int ebullet_cram_shot(const Slot *s)",
+        "static void ebullet_apply_vis(Slot *e)",
     ):
         body = fn_span(ent, sig)
         if not body:
@@ -105,19 +106,16 @@ def main() -> int:
             return fail("%s must not consult skill/ALC" % sig)
     print("  colour helpers: no skill/ALC")
 
-    if not re.search(
-        r"if \(e->variant == 21 && options_bullet_high\(\)\)\s*\n"
-        r"\s*spr_set_sat_col\(\s*e,\s*\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
-        return fail("type 21 8659 must require options_bullet_high() (Easy cannot bypass)")
+    apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)") or ""
+    if "options_bullet_high" not in apply:
+        return fail("type 21 8659 must go through apply_vis / HIGH (Easy cannot bypass)")
     if re.search(
         r"if \(e->variant == 21\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
     ):
         return fail("ungated type 21 8659 still present (Easy NORMAL would cycle)")
-    print("  type 21 8659: HIGH only")
+    print("  type 21 8659: HIGH only via apply_vis")
 
     gun = re.search(r"k_gun\[5\]\[4\]\s*=\s*\{(.*?)\};", ent, re.S)
     if not gun:

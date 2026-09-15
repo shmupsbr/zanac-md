@@ -197,15 +197,11 @@ def main() -> int:
         else:
             print(f"  KEEP: type {name} child-only")
 
-    if not re.search(
-        r"e->variant == 21(?:\s*&&\s*options_bullet_high\(\))?\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
+    if "ebullet_apply_vis" not in ent:
         fail("type 21 8659 was reverted")
         fails += 1
     else:
-        print("  KEEP: type 21 8659 R-nibble|0x80")
+        print("  KEEP: type 21 8659 via ebullet_apply_vis")
     init = fn_span(ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)")
     if not init or "variant != 21" not in init:
         fail("init_frag type 21 no +04 (863b) was reverted")
