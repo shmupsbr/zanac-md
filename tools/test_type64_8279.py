@@ -245,8 +245,11 @@ def main() -> int:
         r"ebullet_lead_disc\(\s*e\s*\)\s*\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
-    ) and "options_bullet_high" not in ent:
+    ) and "options_bullet_high" not in ent and "ebullet_lead_high" not in ent:
         fail("lead discs must not 8659-walk in default (white lock)")
+        fails += 1
+    elif "ebullet_lead_high" not in ent and "options_bullet_high" not in ent:
+        fail("HIGH vis must gate lead 8659 on every skill")
         fails += 1
     else:
         print("  KEEP: type 21 8659; lead discs NORMAL white / HIGH gated; type 45 no 8659")

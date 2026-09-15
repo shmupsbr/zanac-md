@@ -353,11 +353,12 @@
  * off 4 onto 15 (TMS white), and PAL2[4] then pulses while the shot
  * stays white.
  * Pat 7 FRAME_LEAD (types 20/37/38/41/42/43) is the common small
- * bolinha. Japan init +04 is 0x8F (TMS white, EC). Default play keeps
- * that white lock: no CRAM walk, no 8659 R-nibble animation on the
- * disc. Type 21 FRAME_LIGHT_BAR still 8659-walks. HIGH OPTIONS
- * restores the #136 PAL2[4] walk on those discs only. Type 45 stays
- * 0x8F size-pulse. XOR walkers stay on nibble 2 (tests forbid 4 in
+ * bolinha. Japan init +04 is 0x8F (TMS white, EC). BULLET VISIBILITY
+ * (not skill / ALC) owns the colour: NORMAL keeps that white lock on
+ * every skill; HIGH restores the #136 PAL2[4] walk on those discs
+ * only, including type 20/41 which have their own update arms.
+ * Type 21 FRAME_LIGHT_BAR still 8659-walks. Type 45 stays 0x8F
+ * size-pulse. XOR walkers stay on nibble 2 (tests forbid 4 in
  * k_xor_cram_nib). */
 #define LIGHTBAR_CRAM_NIB  4
 #define KIND_BOX        4
@@ -783,13 +784,23 @@ static int ebullet_lead_disc(const Slot *s)
             || v == 41 || v == 42 || v == 43);
 }
 
+/* OPTIONS BULLET VISIBILITY only. Skill / ALC never enter this:
+ * Easy / Normal / Hard must not gate or override white vs cycle.
+ * NORMAL = Japan 0x8F / baked 15. HIGH = #136 PAL2[4] 8659 walk.
+ * Type 20 (stream homing) and type 41 (pair fragment) have their
+ * own update_enemies arms — they must use this same helper. */
+static int ebullet_lead_high(const Slot *s)
+{
+    return ebullet_lead_disc(s) && options_bullet_high();
+}
+
 /* Type 21 bar owns PAL2[4] CRAM (8659 walk, one bank key).
- * Lead discs: NORMAL = Japan 0x8F / baked 15 (white lock). HIGH =
- * the #136 PAL2[4] colour-walk. */
+ * Lead discs: HIGH vis (any skill) shares that nibble; NORMAL stays
+ * baked 15. */
 static int ebullet_cram_shot(const Slot *s)
 {
-    if (ebullet_lead_disc(s))
-        return options_bullet_high();
+    if (ebullet_lead_high(s))
+        return 1;
     return (s->kind == KIND_EBULLET && s->variant == 21);
 }
 
@@ -6282,10 +6293,14 @@ static void update_enemies(void)
             /* +0c=0x0B: Y_homing + Y_motion + X_motion (no X_homing bit4).
              * Y_homing_sub 0x4942: tgt +13=0xFF, accel +15=0x0C, B=+17=1.
              * Then 4898 u8 8.8 wrap-cull Y>=0xD0 / X>=0xD1 (type45 extra-threat
-             * hole: s32 X lived past 0xD1; Y wrap re-entered). */
+             * hole: s32 X lived past 0xD1; Y wrap re-entered).
+             * Colour is BULLET VISIBILITY (ebullet_lead_high), not skill.
+             * #137 gated 37/38/42/43 only; this arm kept the #136 8659
+             * so Easy/Normal stream leads still cycled on NORMAL vis. */
             if ((u8)e->y != 0xFF)
                 e->bind = (u16)(e->bind + 0x000C);
-            spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+            if (ebullet_lead_high(e))
+                spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
             if (step_88_4898(e))
                 continue;
             spr_sync_proj(e);
@@ -6307,12 +6322,13 @@ static void update_enemies(void)
              * Type 45 (0x8608): DEC clock/+0x1c before 4898; on 0: R bit0 ?
              * dir += (R&8)-4 + apply_dir_88(speed) : reload 0x28 then DEC (0x27).
              * 8625: SAT +03 = 0x18 + ((clock&1)<<3) every active frame. */
-            /* 8659 R-nibble|0x80. Type 21 Japan. Lead discs stay 0x8F
-             * in NORMAL; HIGH restores the #136 walk. Type 45 stays
-             * 0x8F size-pulse. */
+            /* 8659 R-nibble|0x80. Type 21 Japan (always). Lead discs
+             * (37/38/42/43 here; 20/41 in their own arms) stay 0x8F
+             * in NORMAL vis on every skill; HIGH restores the #136
+             * walk. Type 45 stays 0x8F size-pulse. */
             if (e->variant == 21)
                 spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
-            else if (ebullet_lead_disc(e) && options_bullet_high())
+            else if (ebullet_lead_high(e))
                 spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
             if (e->variant == 45)
             {
@@ -6362,7 +6378,10 @@ static void update_enemies(void)
                     heading = (u8)((heading + 1) & 15);
             }
             e->aux = (u8)((count << 5) | (meta & 0x10) | heading);
-            spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+            /* Same vis gate as type 20 / 37/38/42/43. Skill must not
+             * leave this pair-fragment 8659 running on NORMAL. */
+            if (ebullet_lead_high(e))
+                spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
             hd = (u8)(heading & 15);
             ih = (u8)((seed & 0x10)
                 ? ((seed + 0xFC) & 15)

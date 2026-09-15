@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Ground/floor 'tiro bolinha' stays white (Japan +04 0x8F).
+"""FRAME_LEAD bolinha colour is OPTIONS BULLET VISIBILITY, not skill.
 
-Filipe after #136: the common small bolinha colour-cycled. He wants the
-OLD white behaviour back: Pat 7 FRAME_LEAD types 20/37/38/41/42/43 stay
-solid TMS white (sat_col 0x8F / baked nibble 15). No CRAM walk, no 8659
-R-nibble animation on the disc.
+NORMAL (default) = Japan white (sat_col 0x8F / baked nibble 15) on
+types 20/37/38/41/42/43, every skill (Easy / Normal / Hard).
+HIGH = #136 PAL2[4] 8659 colour-walk on those discs only, also on
+every skill. Type 21 FRAME_LIGHT_BAR still 8659-walks in both modes.
+Type 45 stays 0x8F size-pulse.
 
-Pat 6 FRAME_LIGHT_BAR (type 21) still 8659-walks on PAL2[4] — that is a
-different art. Type 45 stays 0x8F size-pulse.
+#137 gated 37/38/42/43 but left type 20 / 41 8659 always-on, so
+NORMAL white looked skill-dependent (those types track ALC/rank).
 
 KEEP: init 20/37/38/41/42/43 +04=0x8F (EC); type 21 init no +04;
 8659 still on type 21; gun k_gun colours; 44A6/44BA; no VDP_*Tiles.
@@ -73,11 +74,34 @@ def frame_hist(im, idx: int) -> dict[int, int]:
     return h
 
 
+def vis_gated(body: str) -> bool:
+    """Colour path consults BULLET VISIBILITY, not skill."""
+    return (
+        "options_bullet_high" in body
+        or "BULLET_VIS_HIGH" in body
+        or "ebullet_lead_high" in body
+    )
+
+
+def mentions_skill(body: str) -> bool:
+    return any(
+        n in body
+        for n in (
+            "SKILL_EASY",
+            "SKILL_NORMAL",
+            "SKILL_HARD",
+            "options_skill",
+            "options_alc",
+            "ALC_HALF",
+        )
+    )
+
+
 def cram_ungated(body: str) -> bool:
     """Lead discs on a CRAM/8659 path with no HIGH-visibility gate."""
-    if "ebullet_lead_disc" not in body:
+    if "ebullet_lead_disc" not in body and "ebullet_lead_high" not in body:
         return False
-    if "options_bullet_high" in body or "BULLET_VIS_HIGH" in body:
+    if vis_gated(body):
         return False
     if "return 0" in body and "ebullet_lead_disc" in body:
         # Classifier that explicitly refuses leads is a white lock.
@@ -87,6 +111,17 @@ def cram_ungated(body: str) -> bool:
         ):
             return False
     return True
+
+
+def handler_arm(ent: str, variant: str) -> str | None:
+    """update_enemies arm: else if (... variant == N) { ... }"""
+    m = re.search(
+        rf"else if \(e->kind == KIND_EBULLET && e->variant == {variant}\)"
+        r"\s*\{(.*?)\n        \}",
+        ent,
+        re.S,
+    )
+    return m.group(1) if m else None
 
 
 def main() -> int:
@@ -115,9 +150,22 @@ def main() -> int:
         return fail("type 21 must stay a CRAM shot")
     if cram_ungated(cram):
         return fail("default: lead discs must not be CRAM shots (white lock)")
-    if "options_bullet_high" not in cram:
+    if not vis_gated(cram):
         return fail("HIGH must gate lead CRAM; NORMAL stays white")
+    if mentions_skill(cram):
+        return fail("ebullet_cram_shot must not consult skill/ALC")
     print("  ebullet_cram_shot: type 21 yes; leads NORMAL white / HIGH gated")
+
+    high = fn_span(ent, "static int ebullet_lead_high(const Slot *s)")
+    if not high:
+        return fail("ebullet_lead_high must be the single vis gate for all lead types")
+    if "options_bullet_high" not in high:
+        return fail("ebullet_lead_high must read BULLET VISIBILITY")
+    if mentions_skill(high):
+        return fail("ebullet_lead_high must not consult skill/ALC (Easy/Hard same as Normal)")
+    if mentions_skill(lead):
+        return fail("ebullet_lead_disc must not consult skill/ALC")
+    print("  ebullet_lead_high: vis only; skill never gates white vs cycle")
 
     frag = fn_span(ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)")
     if not frag:
@@ -150,13 +198,32 @@ def main() -> int:
         r"ebullet_lead_disc\(\s*e\s*\)\s*\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
-    ) and "options_bullet_high" not in ent:
+    ) and not vis_gated(ent):
         return fail("lead discs must not 8659-walk in default (white lock)")
     if not re.search(
-        r"ebullet_lead_disc\(\s*e\s*\)\s*&&\s*options_bullet_high\(\s*\)",
+        r"ebullet_lead_high\(\s*e\s*\)",
+        ent,
+    ) and not re.search(
+        r"ebullet_lead_disc\(\s*[es]\s*\)\s*&&\s*options_bullet_high\(\s*\)",
         ent,
     ):
         return fail("HIGH must restore 8659 colour-walk on lead discs only")
+    if ent.count("ebullet_lead_high(e)") < 3:
+        return fail("type 20, 41, and 37/38/42/43 arms must all gate 8659 on vis")
+    v20 = handler_arm(ent, "20")
+    if not v20:
+        return fail("type 20 update arm not found")
+    if "spr_set_sat_col" in v20 and not vis_gated(v20):
+        return fail("type 20 8659 must gate on BULLET VISIBILITY (not skill, not always-on)")
+    if mentions_skill(v20):
+        return fail("type 20 colour must not consult skill")
+    v41 = handler_arm(ent, "41")
+    if not v41:
+        return fail("type 41 update arm not found")
+    if "spr_set_sat_col" in v41 and not vis_gated(v41):
+        return fail("type 41 8659 must gate on BULLET VISIBILITY (not skill, not always-on)")
+    if mentions_skill(v41):
+        return fail("type 41 colour must not consult skill")
     if re.search(
         r"if \(e->variant == 45\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
@@ -164,6 +231,7 @@ def main() -> int:
     ):
         return fail("type 45 must not 8659 (size pulse, colour 0x8F)")
     print("  KEEP: type 21 8659; leads NORMAL white / HIGH walk; type 45 no walk")
+    print("  vis vs skill: NORMAL white on Easy+Hard; HIGH cycle on Easy+Hard")
 
     want = fn_span(ent, "static u8 proj_tile_want(const Slot *s)")
     if not want:
@@ -240,6 +308,17 @@ def main() -> int:
         return fail("BULLET_VIS_NORMAL=0 / HIGH=1")
     if "options_bullet_high" not in opt_c or "options_nudge_bullet_vis" not in opt_c:
         return fail("options must persist BULLET VISIBILITY like other rows")
+    nudge_sk = fn_span(opt_c, "void options_nudge_skill(s8 dir)") or ""
+    nudge_bv = fn_span(opt_c, "void options_nudge_bullet_vis(s8 dir)") or ""
+    if "s_bullet_vis" in nudge_sk:
+        return fail("nudging skill must not write BULLET VISIBILITY")
+    if "s_skill" in nudge_bv:
+        return fail("nudging BULLET VISIBILITY must not write skill")
+    high_fn = fn_span(opt_c, "u8 options_bullet_high(void)") or ""
+    if mentions_skill(high_fn):
+        return fail("options_bullet_high must not consult skill (Easy/Hard same as Normal)")
+    if "options_bullet_vis" not in high_fn:
+        return fail("options_bullet_high must read s_bullet_vis only")
     if '"BULLET VISIBILITY"' not in title:
         return fail("OPTIONS must list BULLET VISIBILITY")
     opt_ui = fn_span(title, "static void draw_options_menu(void)") or ""

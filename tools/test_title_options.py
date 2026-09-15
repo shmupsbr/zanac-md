@@ -335,6 +335,21 @@ def main() -> int:
     else:
         print("  defaults: Normal skill / Normal autofire / 3 ships / EVERY X / bullet NORMAL")
 
+    nudge_sk = fn_span(opt_c, "void options_nudge_skill(s8 dir)") or ""
+    nudge_bv = fn_span(opt_c, "void options_nudge_bullet_vis(s8 dir)") or ""
+    if "s_bullet_vis" in nudge_sk:
+        fail("nudging skill must not write BULLET VISIBILITY")
+        fails += 1
+    if "s_skill" in nudge_bv:
+        fail("nudging BULLET VISIBILITY must not write skill")
+        fails += 1
+    high_fn = fn_span(opt_c, "u8 options_bullet_high(void)") or ""
+    if any(n in high_fn for n in ("SKILL_", "options_skill", "s_skill")):
+        fail("options_bullet_high must ignore skill (Easy/Hard same as Normal)")
+        fails += 1
+    else:
+        print("  vis independent of skill: separate RAM, separate nudges")
+
     if fails:
         print(f"{fails} FAIL(s)", file=sys.stderr)
         return 1

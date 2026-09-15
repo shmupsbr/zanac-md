@@ -2,7 +2,9 @@
 #include "player.h"
 #include "entity.h"
 
-/* Session RAM. Not wiped on title return; no SRAM. */
+/* Session RAM. Not wiped on title return; no SRAM.
+ * s_skill and s_bullet_vis are separate; nudge_skill must never
+ * write visibility, and vice versa. */
 static u8 s_skill = SKILL_NORMAL;
 static u8 s_autofire = AUTOFIRE_NORMAL;
 static u8 s_ships = PLAYER_LIVES_INIT;
