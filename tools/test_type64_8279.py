@@ -213,7 +213,7 @@ def main() -> int:
     # KEEP: type 21 8659; init 863b no +04; lead discs stay 0x8F white
     # (no 8659 / no CRAM). Type 45 stays 0x8F size-pulse.
     if not re.search(
-        r"e->variant == 21\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
+        r"e->variant == 21(?:\s*&&\s*options_bullet_high\(\))?\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
     ):
@@ -228,7 +228,7 @@ def main() -> int:
     else:
         print("  KEEP: type 21 init still no +04")
     if len(re.findall(
-        r"if \(e->variant == 21\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
+        r"if \(e->variant == 21(?: && options_bullet_high\(\))?\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
     )) != 1:

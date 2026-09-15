@@ -72,8 +72,16 @@ def main() -> int:
     m_q = re.search(r"DMA_setMaxQueueSize\((\d+)\)", main_c)
     if not m_q or int(m_q.group(1)) < 192:
         return fail("DMA queue must be >=192 (4-tile pad + NT + HUD restore)")
-    if "DMA_setBufferSize(" not in main_c or "DMA_setMaxTransferSize(0)" not in main_c:
-        return fail("raise DMA buffer / unlimited transfer; do not cap at 7200")
+    m_cap = re.search(r"DMA_setMaxTransferSize\((\d+)\)", main_c)
+    if not m_cap:
+        return fail("DMA_setMaxTransferSize must be set")
+    cap = int(m_cap.group(1))
+    if cap == 0 or cap > 7200:
+        return fail("uncapped DMA snows the top ~40px (chiado); cap at SGDK 7200")
+    if cap < 4096:
+        return fail("DMA cap below the colour soft-defer (4096) drops SAT/NT work")
+    if "DMA_setBufferSize(" not in main_c:
+        return fail("raise DMA buffer (default 8192 NTSC)")
     if re.search(r"SYS_setFPS|setMaxFPS|30\s*\*\s*FPS|fps\s*=\s*30", main_c, re.I):
         return fail("main.c: do not add a 30fps cap")
 

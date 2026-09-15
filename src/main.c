@@ -30,7 +30,12 @@ int main(bool hardReset)
     DMA_setAutoFlush(FALSE);
     DMA_setMaxQueueSize(192);       /* default 80; SAT remap + NT + HUD */
     DMA_setBufferSize(16384);       /* default 8192 NTSC; sat_col remap */
-    DMA_setMaxTransferSize(0);      /* 0 = no cap; ToDefault is 7200 */
+    /* NTSC vblank ~7200 B (SGDK default). 0 = unlimited: leftover VRAM
+     * DMA runs into the next active display and snows the top ~40px
+     * (≈1/5 of 224) — Filipe's chiado. Cap so the flush stays in
+     * vblank; remainder waits in the queue (soft colour defer already
+     * does this above 4096). Autoflush stays off (extra wait = 30Hz). */
+    DMA_setMaxTransferSize(7200);
     DMA_setIgnoreOverCapacity(FALSE);
     mode_init();
     sound_init();
