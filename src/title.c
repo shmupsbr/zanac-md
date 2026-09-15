@@ -476,7 +476,8 @@ static void draw_options_menu(void)
 {
     static const char *k_skill[3] = { "EASY", "NORMAL", "HARD" };
     static const char *k_auto[5] = { "NORMAL", "X2", "X3", "X4", "X5" };
-    /* X = 20000 on the placar (E112=0x20 → 2000 + HUD trailing 0). */
+    /* X = 20000 on the placar (E112=0x20 → 2000 + HUD trailing 0).
+     * NONE +500000 is the visible grant (50000 internal). */
     static const char *k_extend[10] = {
         "EVERY 20000",
         "EVERY 40000",
