@@ -90,8 +90,10 @@ def main() -> int:
         return fail("FIRE digit must stay 0x3A5E col 30")
     if "hud_hbar(0)" not in hud:
         return fail("0x4C29 opening hbar must stay row 0")
-    if "hud_hbar(HUD_CLOSE_HBAR_ROW)" not in hud and "hud_hbar(25)" not in hud:
-        return fail("closing gray hbar must sit at MSX 25 (2 letterbox HUD rows)")
+    if "hud_hbar(HUD_CLOSE_HBAR_ROW)" not in hud and "hud_hbar(23)" not in hud:
+        return fail("closing gray hbar must sit at MSX 23 (playfield end)")
+    if "HUD_CLOSE_HBAR_ROW   25" in (ROOT / "inc" / "hud.h").read_text():
+        return fail("do not leave the closing hbar in the letterbox (MSX 25)")
     if "VDP_setWindowVPos(FALSE, 2)" not in mode:
         return fail("WPV must stay 2 (rows 0-1 full-width WINDOW)")
     if "recolor_charset_tile_opaque_bg" in map_c:

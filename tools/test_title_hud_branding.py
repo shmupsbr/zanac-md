@@ -138,7 +138,6 @@ def main() -> int:
         return fail("s_sel 0 must still start MODE_ORIGINAL")
 
     hud = HUD_C.read_text()
-    hud_h = HUD_H.read_text()
     if "hud_draw_logo();" not in hud:
         return fail("hud_draw_static_labels must stamp the mini logo")
     if "hud_load_logo();" not in hud:
@@ -148,19 +147,15 @@ def main() -> int:
     if "recolor_charset_tile_opaque_bg" in hud:
         return fail("do not opaque-recolor 0x20")
     if 'hud_str_win(HUD_TEXT, hud_y(18), "FIRE ")' not in hud:
-        return fail("FIRE must stay MSX row 18")
-    if "HUD_TIME_MSX_ROW     24" not in hud_h:
-        return fail("TIME must sit at MSX row 24 (moved down for the 6x2)")
-    if "HUD_CLOSE_HBAR_ROW   25" not in hud_h:
-        return fail("gray closing hbar must sit at MSX row 25")
+        return fail("FIRE label stays MSX row 18 (0x3A59); ammo is 19")
     if "hud_y(HUD_TIME_MSX_ROW)" not in hud:
         return fail("hud_draw_time must use HUD_TIME_MSX_ROW")
     if "hud_hbar(HUD_CLOSE_HBAR_ROW)" not in hud:
         return fail("closing gray bar must be HUD_CLOSE_HBAR_ROW")
-    if "hud_hbar(23)" in hud:
-        return fail("do not leave the closing hbar on MSX 23 (that is the gap below the 6x2)")
+    if "hud_hbar(25)" in hud:
+        return fail("do not leave the closing hbar on MSX 25 (letterbox)")
     if "hud_y(21)" in hud:
-        return fail("do not leave TIME on MSX 21 (overlaps the 6x2 MD band)")
+        return fail("do not leave TIME hardcoded on MSX 21 (logo MD band)")
 
     time_fn = hud.split("void hud_draw_time(u8 on, u8 e155)", 1)
     if len(time_fn) < 2:
@@ -175,48 +170,57 @@ def main() -> int:
 
     layout = consts(HUD_H)
     logo_defs = consts(HUD_LOGO_H)
+    fire_row = layout.get("HUD_FIRE_MSX_ROW", 18)
     time_row = layout.get("HUD_TIME_MSX_ROW")
     close_row = layout.get("HUD_CLOSE_HBAR_ROW")
     logo_row = logo_defs.get("HUD_LOGO_MSX_ROW")
     logo_hgt = logo_defs.get("HUD_LOGO_TILE_H")
     if not isinstance(time_row, int) or not isinstance(close_row, int):
         return fail("HUD_TIME_MSX_ROW / HUD_CLOSE_HBAR_ROW must be integers")
-    if close_row - time_row > 2 or close_row - time_row < 1:
-        return fail("TIME must sit 1 or 2 MSX rows above the gray closing border")
+    if close_row != 23:
+        return fail("gray closing hbar must sit at MSX 23 (flush with playfield)")
+    if time_row > 22:
+        return fail("TIME must sit at MSX ≤22 (not in the letterbox)")
+    if close_row - time_row < 1:
+        return fail("TIME must sit above the gray closing border")
     # Playfield is 192px = screen rows 2-25 (MSX 0-23). Letterbox is 26-27.
-    # Do not stamp opaque letter tiles on screen 25 (that steals the last
-    # playfield row). TIME/hbar live in the letterbox HUD corner.
+    # TIME/hbar are on the playfield; letterbox HUD cols are opaque again.
     mode = (ROOT / "src" / "mode.c").read_text()
     if "VDP_fillTileMapRect(BG_A, attr, 0, 25," in mode:
         return fail("letterbox must not stamp BG_A screen row 25 (last playfield row)")
     if "VDP_fillTileMapRect(BG_A, attr, 0, 26, MODE_H32_COLS, 2)" not in mode:
-        return fail("bottom letterbox stays BG_A screen 26-27 (16px, not playfield)")
-    if "VDP_fillTileMapRect(WINDOW, attr, MODE_BAR_COL, 26, MODE_BAR_W, 2)" in mode:
-        return fail("do not letterbox-stamp WINDOW over TIME/hbar (screen 26-27)")
+        return fail("bottom letterbox stays BG_A screen 26-27 full width (incl. HUD)")
+    if "VDP_fillTileMapRect(WINDOW, attr, MODE_BAR_COL, 26, MODE_BAR_W, 2)" not in mode:
+        return fail("letterbox must restamp WINDOW HUD cols 24-31 on screen 26-27")
     if not isinstance(logo_row, int) or not isinstance(logo_hgt, int):
         return fail("HUD_LOGO_MSX_ROW / HUD_LOGO_TILE_H must be integers")
-    fire_last = 19
+    if not isinstance(fire_row, int):
+        return fail("HUD_FIRE_MSX_ROW must be an integer")
+    fire_last = fire_row + 1
+    logo_last = logo_row + logo_hgt - 1
+    fire_rows = set(range(fire_row, fire_last + 1))
+    logo_rows = set(range(logo_row, logo_last + 1))
+    reserved = {16, time_row, close_row}  # ROUND digit, TIME, hbar
+    if logo_rows & fire_rows or logo_rows & reserved or fire_rows & reserved:
+        return fail("FIRE / logo / TIME / hbar / ROUND rows must be disjoint")
+    if time_row in fire_rows or time_row == close_row:
+        return fail("TIME must not overlap FIRE or the closing hbar")
     gap_above = logo_row - fire_last - 1
-    gap_below = time_row - (logo_row + logo_hgt - 1) - 1
-    if gap_above != 1 or gap_below != 1:
-        return fail("logo must be equidistant: 1 blank above and below the 6x2")
+    gap_below = time_row - logo_last - 1
+    if gap_above < 0 or gap_below < 0 or gap_above != gap_below:
+        return fail("logo must be equidistant: same integer X above and below")
 
     logo_h = HUD_LOGO_H.read_text()
-    # FIRE 18-19, blank 20, 6x2 at 21-22, blank 23, TIME 24, hbar 25.
-    if "HUD_LOGO_MSX_ROW    21" not in logo_h:
-        return fail("mini logo must sit at MSX row 21 (gap below FIRE, gap above TIME)")
+    if f"HUD_LOGO_MSX_ROW    {logo_row}" not in logo_h:
+        return fail("mini logo MSX row must match HUD_LOGO_MSX_ROW")
     if "HUD_LOGO_MSX_ROW    17" in logo_h:
         return fail("do not leave the #122 6x1 clip at MSX 17 (ROUND pocket)")
     if "HUD_LOGO_MSX_ROW    16" in logo_h:
         return fail("MSX 16 is the ROUND digit")
     if "HUD_LOGO_MSX_ROW    18" in logo_h:
         return fail("MSX 18 is FIRE")
-    if "HUD_LOGO_MSX_ROW    20" in logo_h:
-        return fail("MSX 20 is the blank gap above the 6x2, not the logo")
-    if "HUD_LOGO_MSX_ROW    22" in logo_h:
-        return fail("do not start the 6x2 on MSX 22 (unequal gap / hits TIME)")
-    if "HUD_LOGO_MSX_ROW    21" not in HUD_BUILD.read_text():
-        return fail("build_hud_logo.py must emit HUD_LOGO_MSX_ROW 21")
+    if f"HUD_LOGO_MSX_ROW    {logo_row}" not in HUD_BUILD.read_text():
+        return fail("build_hud_logo.py must emit the live HUD_LOGO_MSX_ROW")
     if "TITLE_MD_Y" in logo_h:
         return fail("do not touch title constants from the HUD logo header")
     if "HUD_LOGO_TILE_W     6" not in logo_h or "HUD_LOGO_TILE_H     2" not in logo_h:
@@ -263,7 +267,8 @@ def main() -> int:
         return fail("6x2 bottom band must carry the MD mark (red + green)")
 
     print("ok: title Y=40 / groove 12; MD PORT BY SHMUPSBR @ 2026.; "
-          "PLEASE SELECT: / MSX ENHANCED / ZANAC MD; 6x2 HUD @ MSX 21")
+          f"PLEASE SELECT: / MSX ENHANCED / ZANAC MD; 6x2 HUD @ MSX {logo_row}; "
+          f"TIME {time_row} / hbar {close_row}")
     return 0
 
 

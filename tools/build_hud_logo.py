@@ -6,8 +6,9 @@ emits a 48×16 (6×2 tile) 4bpp pattern packed for VDP_loadTileData, plus a
 preview PNG. Colors are remapped onto the in-game PAL3 TMS ramp so the
 dashboard does not steal PAL1 (objs) or flash with PAL0[1].
 
-Pocket: FIRE 18-19, blank 20, 6x2 at MSX 21-22, blank 23, TIME 24,
-closing hbar 25. Good #121 6x2 art (not the #119 / #122 6x1 clip).
+Pocket: FIRE 18-19, 6x2 at MSX 20-21, TIME 22, closing hbar 23.
+X=0 both sides of the logo (X=1 does not fit above hbar 23 without
+hitting ROUND 16). Good #121 6x2 art (not the #119 / #122 6x1 clip).
 
 Writes:
   res/hud_zanac_md.png     — 48×16 indexed preview (TMS-ish RGB)
@@ -176,15 +177,16 @@ def main() -> int:
  * 6x2 tiles (Zanac band + MD band), PAL3 TMS nibbles (color 0 transparent).
  * Good #121 / pre-#122 art — not the broken #119 / #122 6x1 clip.
  *
- * Pocket: WINDOW cols 25-30, MSX rows 21-22 (screen rows 23-24).
- * Column is FIRE 18-19, blank 20, this 6x2, blank 23, TIME 24,
- * gray hbar 25. Equal 1-row gaps. 0x4BDF 03 sides stay. TIME no
- * longer overlaps; clear restores that border row, not this mark.
+ * Pocket: WINDOW cols 25-30, MSX rows 20-21 (screen rows 22-23).
+ * Column is FIRE 18-19, this 6x2, TIME 22, gray hbar 23. Equal X=0
+ * gaps (X=1 does not fit above hbar 23 without hitting ROUND 16).
+ * 0x4BDF 03 sides stay. TIME no longer overlaps; clear restores
+ * TIME's border row, not this mark.
  */
 #define HUD_LOGO_TILE_W     6
 #define HUD_LOGO_TILE_H     2
 #define HUD_LOGO_TILES      (HUD_LOGO_TILE_W * HUD_LOGO_TILE_H)
-#define HUD_LOGO_MSX_ROW    21
+#define HUD_LOGO_MSX_ROW    20
 #define HUD_LOGO_COL        (MODE_BAR_COL + 1)
 #define HUD_LOGO_VDP        (HUD_TILE_BASE + 256)
 
