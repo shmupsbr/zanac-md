@@ -345,6 +345,8 @@
 
 #define KIND_SHOT       2
 #define KIND_FIRE       3
+/* Fire 0/1/2/7 72de owns PAL2[13]. Shot-bank keys use the same index. */
+#define FIRE7_CRAM_NIB  13
 #define KIND_BOX        4
 #define KIND_DUSTER     10
 #define KIND_TERUZO     12
@@ -610,6 +612,9 @@ static u8   sat_col_tile_nibble(const Slot *s, u8 want);
 static s16 sat_depth_primary(Slot *s);
 static s16 sat_depth_marker(Slot *s);
 static void riser_dma_sgt(Slot *s);
+static void spr_sync_proj(Slot *s);
+static void spr_place(Slot *s, u16 frame);
+static void shot_vram_reset(void);
 
 /*
  * entity_dispatch 0x445F: SAT ptr E000, walk E300 stride 0x20 (B=0x1A).
@@ -722,6 +727,177 @@ static void spr_vis_playfield(Sprite *sp, s16 dx, s16 dy, int want_vis)
     SPR_setVisibility(sp, want_vis ? VISIBLE : HIDDEN);
 }
 
+static const u8 k_frame_color[FRAME_N];
+
+/*
+ * Dense KIND_SHOT / KIND_FIRE / KIND_EBULLET: same SAT name + nibble
+ * every lifetime (leads 0x8F, player shots 0x8F, fire after 72de bind).
+ * Each spr_place used to AUTO_VRAM + DMA 32-128 B. A 7-frag umber burst
+ * was ~900 B plus 7 tile-allocator hits in one tick. Bank the first
+ * upload and retarget later sprites at that index (no DMA, no AUTO).
+ * Type 21 R-walk without CRAM is not cached (would fill 16 nibbles).
+ */
+#define SHOT_BANK_N  12
+typedef struct {
+    u8  used;
+    u8  frame;
+    u8  nib;
+    u8  ntiles;
+    u16 index;
+} ShotBank;
+static ShotBank s_shot_bank[SHOT_BANK_N];
+
+static int shot_art_shareable(const Slot *s)
+{
+    return (s->kind == KIND_SHOT || s->kind == KIND_FIRE
+            || s->kind == KIND_EBULLET);
+}
+
+static u8 proj_tile_want(const Slot *s)
+{
+    u8 baked;
+    u8 want;
+
+    if (s->cram_nib)
+        return s->cram_nib;
+    if (s->kind == KIND_FIRE && s_fire7_cram)
+        return FIRE7_CRAM_NIB;
+    if (s->frame >= FRAME_N)
+        return 15;
+    baked = k_frame_color[s->frame];
+    if (baked <= 1)
+        want = baked;
+    else if (s->sat_col)
+        want = (u8)(s->sat_col & 0x0F);
+    else
+        want = baked;
+    return sat_col_tile_nibble(s, want);
+}
+
+static int shot_vram_cacheable(const Slot *s, u8 want)
+{
+    if (!shot_art_shareable(s))
+        return 0;
+    /* Type 21 8659 walks R every armed tick. Shared CRAM is one nibble;
+     * the remap fallback must not bank 16 keys. */
+    if (s->kind == KIND_EBULLET && s->variant == 21 && !s->cram_nib)
+        return 0;
+    (void)want;
+    return 1;
+}
+
+static int shot_bank_lookup(u8 frame, u8 nib, u16 *out)
+{
+    u8 i;
+
+    for (i = 0; i < SHOT_BANK_N; i++)
+    {
+        if (s_shot_bank[i].used && s_shot_bank[i].frame == frame
+            && s_shot_bank[i].nib == nib)
+        {
+            *out = s_shot_bank[i].index;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void shot_vram_reset(void)
+{
+    u8 i;
+
+    for (i = 0; i < SHOT_BANK_N; i++)
+    {
+        if (s_shot_bank[i].used && s_shot_bank[i].ntiles)
+            VDP_releaseTiles(s_shot_bank[i].index, s_shot_bank[i].ntiles);
+        s_shot_bank[i].used = 0;
+        s_shot_bank[i].frame = 0;
+        s_shot_bank[i].nib = 0;
+        s_shot_bank[i].ntiles = 0;
+        s_shot_bank[i].index = 0;
+    }
+}
+
+static void shot_vram_remember(Slot *s, u8 want, u8 ntiles)
+{
+    u8 i;
+    u16 idx;
+
+    if (!s->spr || !ntiles || !shot_vram_cacheable(s, want))
+        return;
+    idx = (u16)(s->spr->attribut & TILE_INDEX_MASK);
+    if (shot_bank_lookup(s->frame, want, &idx))
+    {
+        u16 mine = (u16)(s->spr->attribut & TILE_INDEX_MASK);
+
+        if (mine != idx && (s->spr->status & SPR_FLAG_AUTO_VRAM_ALLOC))
+            VDP_releaseTiles(mine, ntiles);
+        s->spr->attribut = (u16)((s->spr->attribut & ~TILE_INDEX_MASK) | idx);
+        s->spr->status &= (u16)~SPR_FLAG_AUTO_VRAM_ALLOC;
+        return;
+    }
+    for (i = 0; i < SHOT_BANK_N; i++)
+    {
+        if (s_shot_bank[i].used)
+            continue;
+        s_shot_bank[i].used = 1;
+        s_shot_bank[i].frame = s->frame;
+        s_shot_bank[i].nib = want;
+        s_shot_bank[i].ntiles = ntiles;
+        s_shot_bank[i].index = (u16)(s->spr->attribut & TILE_INDEX_MASK);
+        /* Bank owns the tiles for the session. SPR_releaseSprite must
+         * not return them while other leads still point here. */
+        s->spr->status &= (u16)~SPR_FLAG_AUTO_VRAM_ALLOC;
+        return;
+    }
+}
+
+/* 1 = tiles already in VRAM at a shared index; skip DMA. */
+static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
+{
+    u16 idx;
+
+    if (!s->spr || !shot_art_shareable(s))
+        return 0;
+    if (shot_bank_lookup(s->frame, want, &idx))
+    {
+        s->spr->attribut = (u16)((s->spr->attribut & ~TILE_INDEX_MASK) | idx);
+        s->spr->status &= (u16)~SPR_FLAG_AUTO_VRAM_ALLOC;
+        s->vram_fr = s->frame;
+        s->vram_nib = want;
+        return 1;
+    }
+    if (!shot_vram_cacheable(s, want))
+        return 0;
+    /* After remember() the sprite has no AUTO slot. A SAT-name pulse
+     * (type 45 bar/med) must not DMA into the previous frame's tiles. */
+    if (!(s->spr->status & SPR_FLAG_AUTO_VRAM_ALLOC) && ntiles)
+    {
+        s16 fresh = VDP_allocateTiles(ntiles);
+
+        if (fresh < 0)
+            return 1;
+        s->spr->attribut = (u16)((s->spr->attribut & ~TILE_INDEX_MASK)
+                                 | (u16)fresh);
+    }
+    return 0;
+}
+
+static int proj_draw_hidden(const Slot *s)
+{
+    s16 dy;
+    s16 dx;
+
+    if (mode_get() != MODE_ORIGINAL)
+        return 0;
+    dy = mode_draw_y(s->y);
+    if (dy < (s16)mode_y_off()
+        || dy + (s16)MODE_SPR_W > (s16)(mode_y_off() + 192))
+        return 1;
+    dx = mode_draw_x(s->x, s->sat_col);
+    return mode_hud_overlap(dx, MODE_SPR_W);
+}
+
 /*
  * 8f25/8a5a/8f45 SAT Y is +8 per E700.1 (IX+01). TMS nametable has no
  * VSCROLL, so that Y and the tiles stay aligned. MD VSCROLL also has
@@ -773,11 +949,51 @@ static void spr_sync(Slot *s)
      * Do not add ship X+1 or ship Y+2 -- those mis-seat the green flyer. */
     mdx = dx;
     mdy = dy;
-    SPR_setPosition(s->mspr, mdx, mdy);
+        SPR_setPosition(s->mspr, mdx, mdy);
     /* 71f6 always writes the complement SAT. Clip only this EC sprite's
      * own draw box. Do not hide it because the primary overlaps the HUD
      * or because a port line-budget is full -- that left colored halves. */
     spr_vis_playfield(s->mspr, mdx, mdy, 1);
+}
+
+/* Shots / fire / ebullets: position + letterbox/HUD only. No complement,
+ * no depth, no SPR_setPosition while staying hidden (bottom-bar leads
+ * spend ~30 ticks clipped). Hardware sprite is deferred until visible. */
+static void spr_sync_proj(Slot *s)
+{
+    Sprite *sp;
+    s16 dx;
+    s16 dy;
+    int vis;
+
+    if (!s->spr)
+    {
+        if (proj_draw_hidden(s))
+            return;
+        spr_place(s, s->frame);
+        return;
+    }
+    sp = s->spr;
+    dy = mode_draw_y(s->y);
+    dx = mode_draw_x(s->x, s->sat_col);
+    vis = 1;
+    if (mode_get() == MODE_ORIGINAL)
+    {
+        s16 y0 = (s16)mode_y_off();
+
+        if (dy < y0 || dy + (s16)MODE_SPR_W > (s16)(y0 + 192))
+            vis = 0;
+        else if (mode_hud_overlap(dx, MODE_SPR_W))
+            vis = 0;
+    }
+    if (!vis)
+    {
+        if (sp->visibility != 0)
+            SPR_setVisibility(sp, HIDDEN);
+        return;
+    }
+    SPR_setPosition(sp, dx, dy);
+    spr_vis_playfield(sp, dx, dy, 1);
 }
 
 /* MSX spawn_col_marker (0x71da): type 0x27 slot, +04=0x81, HL left at +03.
@@ -1417,6 +1633,9 @@ static void spr_upload_color(Slot *s)
      * Next cool frame uploads the pending nibble. */
     if (s->vram_fr == s->frame && dma_nibble_defer())
         return;
+    /* Shared shot/lead/bar VRAM: retarget attribut, no DMA. */
+    if (shot_vram_prepare(s, want, (u8)ts->numTile))
+        return;
 
     nbytes = (u16)(ts->numTile * 32);
     vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);
@@ -1436,6 +1655,7 @@ static void spr_upload_color(Slot *s)
             DMA_queueDma(DMA_VRAM, (void *)src, vaddr, (u16)(nbytes / 2), 2);
             s->vram_fr = s->frame;
             s->vram_nib = want;
+            shot_vram_remember(s, want, (u8)ts->numTile);
             return;
         }
 
@@ -1463,6 +1683,7 @@ static void spr_upload_color(Slot *s)
         }
         s->vram_fr = s->frame;
         s->vram_nib = want;
+        shot_vram_remember(s, want, (u8)ts->numTile);
     }
 }
 
@@ -1507,8 +1728,18 @@ static void spr_place(Slot *s, u16 frame)
         marker_kill(s);
     if (!s->spr)
     {
+        u16 bank_idx = 0;
+        u8 want;
+        u8 share;
+
         s->vram_fr = 0xFF;
         s->vram_nib = 0xFF;
+        /* Letterboxed / HUD-clipped shots: sim stays live, no SAT work. */
+        if (shot_art_shareable(s) && proj_draw_hidden(s))
+            return;
+        want = proj_tile_want(s);
+        share = (u8)(shot_art_shareable(s)
+                     && shot_bank_lookup((u8)frame, want, &bank_idx));
         s->spr = SPR_addSpriteEx(&spr_objs, mode_draw_x(s->x, s->sat_col),
                                  slot_draw_y(s),
                                  TILE_ATTR(PAL2, FALSE, FALSE, FALSE),
@@ -1522,9 +1753,29 @@ static void spr_place(Slot *s, u16 frame)
             SPR_setVisibility(s->spr, HIDDEN);
             SPR_setPriority(s->spr, FALSE);
             SPR_setAnimAndFrame(s->spr, 0, frame);
-            spr_upload_color(s);
+            if (share)
+            {
+                /* Same addSprite flags as flyers. Drop the unused AUTO
+                 * slot and sit on the banked lead/shot tiles. */
+                if (s->spr->frame && s->spr->frame->tileset
+                    && s->spr->frame->tileset->numTile)
+                    VDP_releaseTiles(
+                        (u16)(s->spr->attribut & TILE_INDEX_MASK),
+                        s->spr->frame->tileset->numTile);
+                s->spr->attribut = (u16)((s->spr->attribut & ~TILE_INDEX_MASK)
+                                         | bank_idx);
+                s->spr->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
+                s->spr->status &= (u16)~SPR_FLAG_AUTO_VRAM_ALLOC;
+                s->vram_fr = (u8)frame;
+                s->vram_nib = want;
+            }
+            else
+                spr_upload_color(s);
             sat_bind_depth(s->spr, sat_depth_primary(s));
-            spr_sync(s);
+            if (shot_art_shareable(s))
+                spr_sync_proj(s);
+            else
+                spr_sync(s);
         }
     }
     else
@@ -1554,7 +1805,10 @@ static void spr_place(Slot *s, u16 frame)
         else
             spr_upload_color(s);
         sat_bind_depth(s->spr, sat_depth_primary(s));
-        spr_sync(s);
+        if (shot_art_shareable(s))
+            spr_sync_proj(s);
+        else
+            spr_sync(s);
     }
 }
 
@@ -1880,6 +2134,14 @@ static int aabb(s16 x1, s16 y1, s16 w1, s16 h1,
 {
     return (x1 < (s16)(x2 + w2)) && ((s16)(x1 + w1) > x2)
         && (y1 < (s16)(y2 + h2)) && ((s16)(y1 + h1) > y2);
+}
+
+/* 4560 boxes are always inside the SAT 16x16. Missing squares cannot
+ * overlap, so this reject cannot change Japan hit results. */
+static int sat_box_miss(s16 x1, s16 y1, s16 x2, s16 y2)
+{
+    return ((s16)(x2 - x1) >= 16) || ((s16)(x1 - x2) >= 16)
+        || ((s16)(y2 - y1) >= 16) || ((s16)(y1 - y2) >= 16);
 }
 
 
@@ -5256,15 +5518,13 @@ static void update_shots(void)
         if (s_shot_init_ret[i])
         {
             s_shot_init_ret[i] = 0;
-            if (s->spr)
-                spr_sync(s);
+            spr_sync_proj(s);
             continue;
         }
         /* 7225 -> 4898: +0c=1 Y-only, unsigned Y>=0xD0. */
         if (step_88_y_4898(s))
             continue;
-        if (s->spr)
-            spr_sync(s);
+        spr_sync_proj(s);
     }
 }
 
@@ -5411,20 +5671,23 @@ static void update_fire(void)
          * the remaining colour-cycle hitch. */
         fire7_cycle_cram(f);
     }
-    if (f->spr)
+    if (f->spr || shot_art_shareable(f))
     {
         s16 fdx = mode_draw_x(f->x, f->sat_col);
 
-        spr_sync(f);
+        spr_sync_proj(f);
         /* spr_sync hid HUD overlap. Do not SPR_setVisibility(VISIBLE)
          * over the bar (that flicker). Blink/expire only on-playfield. */
-        if (mode_hud_overlap(fdx, MODE_SPR_W))
-            SPR_setVisibility(f->spr, HIDDEN);
-        else if (cycle)
-            spr_vis_playfield(f->spr, fdx, mode_draw_y(f->y),
-                              (fn == 0 || fn == 1 || fn == 7) ? 1 : (f->script & 1));
-        else
-            spr_vis_playfield(f->spr, fdx, mode_draw_y(f->y), 1);
+        if (f->spr)
+        {
+            if (mode_hud_overlap(fdx, MODE_SPR_W))
+                SPR_setVisibility(f->spr, HIDDEN);
+            else if (cycle)
+                spr_vis_playfield(f->spr, fdx, mode_draw_y(f->y),
+                                  (fn == 0 || fn == 1 || fn == 7) ? 1 : (f->script & 1));
+            else
+                spr_vis_playfield(f->spr, fdx, mode_draw_y(f->y), 1);
+        }
     }
 
     if (fn != 0 && fn != 1 && fn != 2 && fn != 3 && fn != 6 && fn != 7)
@@ -5930,8 +6193,7 @@ static void update_enemies(void)
              * 42/43 85ed: XOR then RET (type already 0xA5/0xA6). No 4898,
              * no 8659, no 857f DEC +15. SAT stays at spawn XY this visit. */
             s_ebullet_init_ret[i] = 0;
-            if (e->spr || e->mspr)
-                spr_sync(e);
+            spr_sync_proj(e);
             continue;
         }
         else if (e->kind == KIND_EBULLET && e->variant == 20)
@@ -5944,6 +6206,8 @@ static void update_enemies(void)
                 e->bind = (u16)(e->bind + 0x000C);
             if (step_88_4898(e))
                 continue;
+            spr_sync_proj(e);
+            continue;
         }
         else if (e->kind == KIND_EBULLET
             && (e->variant == 21 || e->variant == 37 || e->variant == 38
@@ -5983,6 +6247,8 @@ static void update_enemies(void)
             }
             if (step_88_4898(e))
                 continue;
+            spr_sync_proj(e);
+            continue;
         }
         else if (e->kind == KIND_EBULLET && e->variant == 41)
         {
@@ -6017,6 +6283,8 @@ static void update_enemies(void)
             e->vy = 0;
             if (step_88_4898(e))
                 continue;
+            spr_sync_proj(e);
+            continue;
         }
         /* Type 69: X drifts only on successful fire (spawner_step); vx holds
          * drift delta and must not feed the shared integer pass.
@@ -6140,6 +6408,10 @@ static void collide_bolt_enemies(Slot *bolt, u8 persist)
 {
     u8 j;
     u8 bolt_sat = bolt->sat ? bolt->sat : (u8)0x28;
+    u8 is_fire = (u8)(bolt == &s_fire);
+    s16 ax, ay, aw, ah;
+
+    hitbox_of(bolt_sat, bolt->x, bolt->y, &ax, &ay, &aw, &ah);
 
     for (j = 0; j < ENEMY_SLOTS; j++)
     {
@@ -6149,16 +6421,42 @@ static void collide_bolt_enemies(Slot *bolt, u8 persist)
         u8 kind;
         if (!e->alive)
             continue;
+        if (sat_box_miss(bolt->x, bolt->y, e->x, e->y))
+            continue;
         /* Shots: 44F9 (44BA/44CA). Fire: E14E 44D4 bit0 / 44F9 bit1. */
-        if (bolt == &s_fire)
+        if (is_fire)
         {
             if (!enemy_takes_fire(e))
                 continue;
         }
-        else if (!enemy_takes_shots(e))
-            continue;
-        if (!hit_overlap_slot(bolt->x, bolt->y, bolt_sat, e))
-            continue;
+        else
+        {
+            /* 44A6 leads: shots pass through. Kind/variant before post_flags. */
+            if (e->kind == KIND_EBULLET)
+            {
+                u8 t = (u8)(e->variant & 0x7F);
+
+                if (t == 20 || t == 37 || t == 38 || t == 41
+                    || t == 42 || t == 43)
+                    continue;
+            }
+            if (!enemy_takes_shots(e))
+                continue;
+        }
+        {
+            u8 esat;
+            s16 bx, by, bw, bh;
+
+            if (e->kind == KIND_RISER)
+                esat = 0;
+            else if (e->kind == KIND_EBULLET)
+                esat = ebullet_sat_name(e);
+            else
+                esat = e->sat ? e->sat : (u8)0x40;
+            hitbox_of(esat, e->x, e->y, &bx, &by, &bw, &bh);
+            if (!aabb(ax, ay, aw, ah, bx, by, bw, bh))
+                continue;
+        }
 
         if (!persist)
             spr_kill(bolt);
@@ -6440,6 +6738,8 @@ static void collide_player(void)
             continue;          /* 782c: no entity_post / SAT is countdown */
         if (e->kind == KIND_CIRCLE && !(e->aux & 0x40))
             continue;          /* 83ee: idle XOR only, no 44BA */
+        if (sat_box_miss(px, py, e->x, e->y))
+            continue;
         /* Type 44 KIND_GROUND is 44BA on MSX (82ff JP 44BA). sat_col
          * 0x83 is TMS 3 light green — the green flyer. Do not skip it
          * as 44CA; that let the plane pass through the ship. */
@@ -6548,7 +6848,6 @@ static void collide_player(void)
  * (inc/map_script.h). Not title branding. Fire 7 72de INC cycles SAT
  * colour; MSX writes one SAT byte. MD tile remap every frame starves NT
  * DMA (blue tear). Bind comet tiles to PAL2[13] once and cycle CRAM. */
-#define FIRE7_CRAM_NIB  13
 static const u16 k_tms_vdp[16] = {
     RGB24_TO_VDPCOLOR(TMS_GAME_RGB_0),
     RGB24_TO_VDPCOLOR(TMS_GAME_RGB_1),
@@ -6611,6 +6910,7 @@ static void fire7_paint_cram_tiles(Slot *f)
         orb_paint_body_nibbles(buf, src, nbytes, want);
     f->vram_fr = f->frame;
     f->vram_nib = want;
+    shot_vram_remember(f, want, ts->numTile ? (u8)ts->numTile : 4);
 }
 
 static void fire7_bind_cram(Slot *f)
@@ -6747,6 +7047,8 @@ static void xor_cram_paint(Slot *s, u8 nib)
         return;
     baked = k_frame_color[s->frame];
     nbytes = (u16)(ts->numTile * 32);
+    if (shot_vram_prepare(s, nib, (u8)ts->numTile))
+        return;
     vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);
     src = (const u8 *)FAR_SAFE(ts->tiles, nbytes);
     cached = remap_cache_get(s->frame, baked, nib, src, nbytes, 0);
@@ -6755,6 +7057,7 @@ static void xor_cram_paint(Slot *s, u8 nib)
     DMA_queueDma(DMA_VRAM, (void *)cached, vaddr, (u16)(nbytes / 2), 2);
     s->vram_fr = s->frame;
     s->vram_nib = nib;
+    shot_vram_remember(s, nib, (u8)ts->numTile);
 }
 
 static int xor_cram_bind(Slot *s, u8 col)
@@ -6793,6 +7096,8 @@ void entity_init(void)
     orb_cache_reset();
     remap_cache_reset();
     xor_cram_reset_all();
+    /* SPR_reset already ran; bank indices are stale. Do not VDP_release. */
+    memset(s_shot_bank, 0, sizeof(s_shot_bank));
     s_rng = 0xA351;
     s_spawn_ctrl = 0x02;          /* stream active */
     s_spawn_base = 0;
@@ -6858,6 +7163,7 @@ void entity_release(void)
     spr_kill(&s_fire);
     for (i = 0; i < ENEMY_SLOTS; i++)
         spr_kill(&s_en[i]);
+    shot_vram_reset();
 }
 
 void entity_on_spawn_ctrl(u8 ctrl)
@@ -7093,7 +7399,8 @@ bool entity_spawn_shot(s16 x, s16 y)
      * placed, copied from ship SAT X at 0x76e1. */
     free->sat_col = 0x8F;
     spr_place(free, frame);
-    if (!free->spr)
+    /* Hardware sprite may be deferred while letterboxed / HUD-clipped. */
+    if (!free->spr && !proj_draw_hidden(free))
     {
         free->alive = 0;
         return FALSE;
@@ -7236,7 +7543,7 @@ void entity_try_spawn_fire(s16 x, s16 y, u8 xvel_sel)
     if (fn == 0 || fn == 1 || fn == 2 || fn == 7)
         s_fire.sat_col = 0x81;      /* 0x72bc 0x80 then 0x72de INC; EC stays */
     spr_place(&s_fire, frame);
-    if (!s_fire.spr)
+    if (!s_fire.spr && !proj_draw_hidden(&s_fire))
     {
         s_fire.alive = 0;
         return;

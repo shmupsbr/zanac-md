@@ -50,10 +50,12 @@ int main(bool hardReset)
          * would hide DMA prep in a second retrace) and do not flush
          * before the wait (autoflush-on / mid-frame flush = 30 Hz).
          * Remaining worst-case (hardware, not a second wait):
-         *  20 sprites/line MD SAT flicker; type 67/45 SAT-name walk
-         *  still DMA 128 B/tick (shape change, not colour); kinds
-         *  that miss the shared XOR CRAM nibble defer colour DMA
-         *  when the queue is >=4096 B. Sim never skips a vblank. */
+         *  20 sprites/line MD SAT flicker (not a dropped logic tick);
+         *  type 67/45 SAT-name walk still DMA 128 B/tick (shape, not
+         *  colour); kinds that miss the shared XOR CRAM nibble defer
+         *  colour DMA when the queue is >=4096 B. Shot/lead/bar tiles
+         *  share a VRAM bank after the first upload. Sim never skips
+         *  a vblank. */
         SPR_update();
         SYS_doVBlankProcess();  /* one wait_one_frame 0x4306 */
         DMA_flushQueue();       /* flush in THAT vblank; never before */

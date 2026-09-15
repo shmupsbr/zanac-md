@@ -148,8 +148,57 @@ def main() -> int:
     if "DMA_setAutoFlush(TRUE)" in ent or "DMA_setAutoFlush(TRUE)" in game_c:
         return fail("do not re-enable DMA autoflush outside main.c")
 
+    # Shot / fire / ebullet hot path (dense spam). Do not redo #129.
+    if "s_shot_bank" not in ent or "shot_vram_prepare" not in ent:
+        return fail("static shot/lead/bar tiles must hit a shared VRAM bank")
+    if "shot_vram_remember" not in ent:
+        return fail("first shot/lead upload must be remembered for later sprites")
+    if "spr_sync_proj" not in ent:
+        return fail("fire/ebullet/shots need a cheap position+clip sync")
+    proj = re.search(
+        r"static void spr_sync_proj\(Slot \*s\)\s*\{(.*?)^\}", ent, re.S | re.M
+    )
+    if not proj:
+        return fail("spr_sync_proj not found")
+    if "sat_bind_depth" in proj.group(1) or "SPR_setDepth(" in proj.group(1):
+        return fail("spr_sync_proj must not re-bind depth (shots never change SAT order)")
+    if "mspr" in proj.group(1):
+        return fail("projectiles have no 71f6 complement; skip marker work")
+    if "proj_draw_hidden" not in ent:
+        return fail("letterboxed shots must skip hardware sprite alloc")
+    if "sat_box_miss" not in ent:
+        return fail("shot/enemy SAT squares must early-out before AABB")
+    bolt = re.search(
+        r"static void collide_bolt_enemies\(Slot \*bolt, u8 persist\)\s*\{(.*?)^\}",
+        ent,
+        re.S | re.M,
+    )
+    if not bolt:
+        return fail("collide_bolt_enemies not found")
+    if "sat_box_miss" not in bolt.group(1):
+        return fail("collide_bolt_enemies must sat_box_miss before takes_shots")
+    if "hitbox_of(bolt_sat" not in bolt.group(1):
+        return fail("bolt hitbox must be computed once per bolt, not per enemy")
+    if "enemy_takes_shots" not in bolt.group(1) or "enemy_takes_fire" not in bolt.group(1):
+        return fail("KEEP: 44F9 / E14E gates after the SAT-box reject")
+    if "ebullet_sat_name" not in bolt.group(1):
+        return fail("KIND_EBULLET AABB must still use ebullet_sat_name")
+    colp = re.search(
+        r"static void collide_player\(void\)\s*\{(.*?)^\}", ent, re.S | re.M
+    )
+    if not colp or "sat_box_miss" not in colp.group(1):
+        return fail("collide_player must sat_box_miss before post_flags")
+    if "ebullet_hits_player" not in colp.group(1):
+        return fail("KEEP: ebullet ship hits after the SAT-box reject")
+    # Japan spawn / motion unchanged.
+    if "s_ebullet_init_ret" not in ent or "s_shot_init_ret" not in ent:
+        return fail("KEEP: 7221 / 84fa init-RET skips")
+    if re.search(r"SHOT_SLOTS\s+2|ENEMY_SLOTS\s+1[0-6]\b", ent):
+        return fail("do not shrink shot/enemy pools to fake 60fps")
+
     print("ok: SPR_update; doVBlank; flush; DMA budget raised; no 30fps cap")
     print("ok: shared XOR CRAM; nibble DMA defer; depth bind at place only")
+    print("ok: shot VRAM bank; spr_sync_proj; SAT-box collision early-out")
     return 0
 
 
