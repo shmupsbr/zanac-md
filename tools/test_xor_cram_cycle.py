@@ -6,9 +6,13 @@ Japan +04 XOR / 72de is one SAT-colour byte. MD tile remap every tick
 remaining hitch after fire 0/1/2/7 shared PAL2[13].
 
 Bind body pixels to an unused PAL2 nibble (2 -- not type 65/67/61
-sat_col 5/6, not fire7 13). 0x8D (type 67 840a / type 61 table) aliases
-to nibble 12 so fire 0/1/2/7 cannot rainbow those bodies.
-Later spr_set_sat_col only writes CRAM. Pool miss still hits remap_cache.
+sat_col 5/6, not fire7 13, not LIGHT_BAR baked 4). 0x8D (type 67 840a
+/ type 61 table) aliases to nibble 12 so fire 0/1/2/7 cannot rainbow
+those bodies.
+Share nibble 2 among all walkers of the same kind (refcount). Exclusive
+per-sprite left a full SIG wave on remap+DMA every tick.
+Later spr_set_sat_col only writes CRAM. Other kinds miss the pool and
+hit remap_cache + dma_nibble_defer.
 
 Type 67 (SAT ^=0x34 every tick) is not a walker -- shape + colour.
 Type 45 bar/med is not a walker.
@@ -56,6 +60,10 @@ def main() -> int:
         return fail("XOR leftovers must CRAM-bind like fire 7")
     if "k_xor_cram_nib" not in ent:
         return fail("XOR CRAM pool must exist")
+    if "s_xor_cram_kind" not in ent or "s_xor_cram_refs" not in ent:
+        return fail("XOR CRAM must be shared by kind (refcount)")
+    if re.search(r"k_xor_cram_nib\[XOR_CRAM_N\] = \{[^}]*\b4\b", ent):
+        return fail("XOR CRAM must not own nibble 4 (FRAME_LIGHT_BAR baked 4)")
     if re.search(r"k_xor_cram_nib\[XOR_CRAM_N\] = \{[^}]*\b5\b", ent):
         return fail("XOR CRAM must not own nibble 5 (type 65 0x85)")
     if re.search(r"k_xor_cram_nib\[XOR_CRAM_N\] = \{[^}]*\b6\b", ent):
@@ -73,6 +81,13 @@ def main() -> int:
     if "xor_cram_cycle" not in setc or "xor_cram_bind" not in setc:
         return fail("spr_set_sat_col must CRAM-cycle after bind")
     print("  spr_set_sat_col: bind once, then CRAM")
+
+    alloc = fn_span(ent, "static u8 xor_cram_alloc(const Slot *s)")
+    if not alloc:
+        return fail("xor_cram_alloc must take the slot (share by kind)")
+    if "s_xor_cram_kind" not in alloc or "s_xor_cram_refs" not in alloc:
+        return fail("xor_cram_alloc must refcount the owner kind")
+    print("  xor_cram_alloc: shared by kind")
 
     wanted = fn_span(ent, "static int xor_cram_wanted(const Slot *s)")
     if not wanted:

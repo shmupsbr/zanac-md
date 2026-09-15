@@ -8,6 +8,8 @@ zanac.asm 0x445F: SAT ptr E000, IX=E300, B=0x1A, stride 0x20.
 
 SPR_MIN_DEPTH (-0x8000) loses to draw Y if SGDK sorts unsigned.
 Slot depths start at 0. Clear AUTO_DEPTH so SPR_update cannot Y-sort.
+SGDK 2.11 SPR_setDepth immediately sortSprite-inserts -- bind at
+place/init only. spr_sync must not re-bind (Y-sort thrash).
 
 Usage (from zanac-md):
     python tools/test_sat_order.py
@@ -59,6 +61,27 @@ def main() -> int:
         return 1
     if "SPR_FLAG_AUTO_DEPTH" not in ply:
         print("FAIL: ship must clear AUTO_DEPTH")
+        return 1
+
+    sync = re.search(r"static void spr_sync\(Slot \*s\)\s*\{(.*?)^\}", ent, re.S | re.M)
+    if not sync:
+        print("FAIL: spr_sync not found")
+        return 1
+    if "sat_bind_depth" in sync.group(1) or "SPR_setDepth(" in sync.group(1):
+        print("FAIL: spr_sync must not SPR_setDepth (immediate sortSprite)")
+        return 1
+    if "sat_depth_ok" not in ent:
+        print("FAIL: cache SAT depth after the first slot-index lookup")
+        return 1
+    show = re.search(r"static void show_ship\(int vis\)\s*\{(.*?)^\}", ply, re.S | re.M)
+    if not show:
+        print("FAIL: show_ship not found")
+        return 1
+    if "SPR_setDepth(" in show.group(1):
+        print("FAIL: show_ship must not re-bind depth every tick")
+        return 1
+    if "SPR_setDepth(s_spr, 0)" not in ply or "SPR_setDepth(s_cspr, 1)" not in ply:
+        print("FAIL: ship depth still bound once at init")
         return 1
 
     # MSX slot math: fire is slot 4 (E380), enemies start slot 5 (E3A0).
