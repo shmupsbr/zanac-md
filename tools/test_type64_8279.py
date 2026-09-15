@@ -210,49 +210,26 @@ def main() -> int:
     else:
         print("  spawn_from_type(64): clamp 0x5F")
 
-    # KEEP: type 21 8659; init 863b no +04; lead discs stay 0x8F white
-    # (no 8659 / no CRAM). Type 45 stays 0x8F size-pulse.
-    if not re.search(
-        r"e->variant == 21(?:\s*&&\s*options_bullet_high\(\))?\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
-        fail("type 21 8659 was reverted")
+    # KEEP: type 21 8659 via apply_vis; NORMAL white / HIGH cycle.
+    if "ebullet_apply_vis" not in ent:
+        fail("type 21 8659 was reverted (apply_vis missing)")
         fails += 1
     else:
-        print("  KEEP: type 21 8659 R-nibble|0x80")
+        print("  KEEP: type 21 8659 R-nibble|0x80 via apply_vis")
     init = fn_span(ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)")
-    if not init or "variant != 21" not in init:
-        fail("init_frag type 21 no +04 (863b) was reverted")
+    if not init or "ebullet_apply_vis" not in init:
+        fail("init_frag type 21 colour via apply_vis was reverted")
         fails += 1
     else:
-        print("  KEEP: type 21 init still no +04")
-    if len(re.findall(
-        r"if \(e->variant == 21(?: && options_bullet_high\(\))?\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    )) != 1:
-        fail("type 21 8659 must stay a single write")
+        print("  KEEP: type 21 init apply_vis")
+    if ent.count("spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)))") != 1:
+        fail("8659 must stay a single write (inside apply_vis)")
         fails += 1
-    elif re.search(
-        r"if \(e->variant == 45\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
-        fail("do not apply 8659 to type 45 (size pulse, colour 0x8F)")
-        fails += 1
-    elif re.search(
-        r"ebullet_lead_disc\(\s*e\s*\)\s*\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ) and "options_bullet_high" not in ent and "ebullet_lead_high" not in ent:
-        fail("lead discs must not 8659-walk in default (white lock)")
-        fails += 1
-    elif "ebullet_lead_high" not in ent and "options_bullet_high" not in ent:
-        fail("HIGH vis must gate lead 8659 on every skill")
+    elif "ebullet_bolinha_high" not in ent and "options_bullet_high" not in ent:
+        fail("HIGH vis must gate bolinha 8659 on every skill")
         fails += 1
     else:
-        print("  KEEP: type 21 8659; lead discs NORMAL white / HIGH gated; type 45 no 8659")
+        print("  KEEP: one 8659 in apply_vis; NORMAL white / HIGH gated")
 
     jump = fn_span(mapc, "static void cmd_script_jump(u8 cmd, const u8 *ops)")
     if not jump:

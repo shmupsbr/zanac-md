@@ -271,15 +271,11 @@ def main() -> int:
         print("  update_enemies: init RET then 4898 / 8659 / 857f")
 
     # Armed paths still run after the skip.
-    if not re.search(
-        r"e->variant == 21(?:\s*&&\s*options_bullet_high\(\))?\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
+    if "ebullet_apply_vis" not in ent:
         fail("type 21 8659 was reverted")
         fails += 1
     else:
-        print("  KEEP: type 21 8659 R-nibble|0x80 on armed visit")
+        print("  KEEP: type 21 8659 after skip")
 
     v41 = re.search(
         r"else if \(e->kind == KIND_EBULLET && e->variant == 41\)\s*\{(.+?)\n        \}",

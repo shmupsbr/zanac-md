@@ -2,9 +2,9 @@
 """FRAME_LEAD bolinha + type 21 bar colour is OPTIONS BULLET VISIBILITY.
 
 NORMAL (default) = Japan white (sat_col 0x8F / baked nibble 15) on
-types 20/37/38/41/42/43 AND type 21, every skill (Easy / Normal / Hard).
-HIGH = #136 PAL2[4] 8659 colour-walk on those, also on every skill.
-Type 45 stays 0x8F size-pulse.
+every tiro bolinha (20/37/38/41/42/43, type 21 bar, type 45 bar/med),
+every skill (Easy / Normal / Hard). HIGH = #136 PAL2[4] 8659 colour-walk
+on those same types, also on every skill. Visibility is the only switch.
 
 #138 gated 20/41 but left type 21 8659 always-on. Easy k_gun 48/49
 (and 52-55) plus type-73 base_fire spawn that bar, so Easy+NORMAL
@@ -81,6 +81,8 @@ def vis_gated(body: str) -> bool:
         "options_bullet_high" in body
         or "BULLET_VIS_HIGH" in body
         or "ebullet_lead_high" in body
+        or "ebullet_bolinha_high" in body
+        or "ebullet_apply_vis" in body
     )
 
 
@@ -147,98 +149,71 @@ def main() -> int:
     cram = fn_span(ent, "static int ebullet_cram_shot(const Slot *s)")
     if not cram:
         return fail("ebullet_cram_shot not found")
-    if "variant == 21" not in cram and "ebullet_type21" not in cram:
-        return fail("type 21 must stay a CRAM shot on HIGH")
-    if "options_bullet_high" not in cram and "ebullet_lead_high" not in cram:
-        return fail("type 21 CRAM must gate on BULLET VISIBILITY (Easy k_gun 21)")
+    if "ebullet_bolinha_high" not in cram and "options_bullet_high" not in cram:
+        return fail("CRAM must gate on BULLET VISIBILITY (every bolinha on HIGH)")
     if cram_ungated(cram):
         return fail("default: lead discs must not be CRAM shots (white lock)")
     if not vis_gated(cram):
         return fail("HIGH must gate lead CRAM; NORMAL stays white")
     if mentions_skill(cram):
         return fail("ebullet_cram_shot must not consult skill/ALC")
-    t21 = fn_span(ent, "static int ebullet_type21(const Slot *s)")
-    if t21 and mentions_skill(t21):
-        return fail("ebullet_type21 must not consult skill/ALC")
-    print("  ebullet_cram_shot: type 21 HIGH only; leads NORMAL white / HIGH gated")
+    print("  ebullet_cram_shot: every bolinha HIGH only; NORMAL white")
 
-    high = fn_span(ent, "static int ebullet_lead_high(const Slot *s)")
+    high = fn_span(ent, "static int ebullet_bolinha_high(const Slot *s)")
     if not high:
-        return fail("ebullet_lead_high must be the single vis gate for all lead types")
+        return fail("ebullet_bolinha_high must be the single vis gate")
     if "options_bullet_high" not in high:
-        return fail("ebullet_lead_high must read BULLET VISIBILITY")
+        return fail("ebullet_bolinha_high must read BULLET VISIBILITY")
     if mentions_skill(high):
-        return fail("ebullet_lead_high must not consult skill/ALC (Easy/Hard same as Normal)")
+        return fail("ebullet_bolinha_high must not consult skill/ALC")
     if mentions_skill(lead):
         return fail("ebullet_lead_disc must not consult skill/ALC")
-    print("  ebullet_lead_high: vis only; skill never gates white vs cycle")
+    boli = fn_span(ent, "static int ebullet_bolinha(const Slot *s)")
+    if not boli:
+        return fail("ebullet_bolinha must classify every tiro bolinha")
+    if "21" not in boli or "45" not in boli:
+        return fail("ebullet_bolinha must include type 21 and type 45")
+    print("  ebullet_bolinha_high: vis only; skill never gates white vs cycle")
 
     frag = fn_span(ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)")
     if not frag:
         return fail("init_frag not found")
-    if "variant != 21" not in frag or "e->sat_col = 0x8F" not in frag:
-        return fail("init still writes Japan +04=0x8F on 20/37/38/41/42/43")
+    if "ebullet_apply_vis" not in frag:
+        return fail("init_frag must arm colour via ebullet_apply_vis")
     if re.search(r"if\s*\(\s*variant\s*==\s*21\s*\)\s*\n\s*e->sat_col", frag):
-        return fail("init_frag must not invent type 21 +04 (863b)")
+        return fail("init_frag must not invent a private type 21 +04")
     if "FRAME_LIGHT_BAR : FRAME_LEAD" not in frag.replace(" ", "") and (
         "(variant == 21 || variant == 45) ? FRAME_LIGHT_BAR : FRAME_LEAD" not in frag
     ):
         return fail("type 21/45 spr_place FRAME_LIGHT_BAR; leads FRAME_LEAD")
     if "cram_nib = 0" not in frag:
         return fail("init_frag must clear leftover cram_nib before spr_place")
-    if "options_bullet_high" not in frag:
-        return fail("init_frag type 21 +04=0x8F on NORMAL (EC); HIGH keeps 863b")
-    print("  init_frag: leads 0x8F FRAME_LEAD; type 21 NORMAL 0x8F / HIGH no +04")
+    print("  init_frag: apply_vis; 21/45 FRAME_LIGHT_BAR; leads FRAME_LEAD")
 
-    if not re.search(
-        r"if \(e->variant == 21 && options_bullet_high\(\)\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
-        return fail("type 21 8659 must gate on BULLET VISIBILITY (Easy cannot bypass)")
-    if len(re.findall(
-        r"if \(e->variant == 21 && options_bullet_high\(\)\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    )) != 1:
-        return fail("type 21 8659 must stay a single write")
-    if re.search(
-        r"ebullet_lead_disc\(\s*e\s*\)\s*\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ) and not vis_gated(ent):
-        return fail("lead discs must not 8659-walk in default (white lock)")
-    if not re.search(
-        r"ebullet_lead_high\(\s*e\s*\)",
-        ent,
-    ) and not re.search(
-        r"ebullet_lead_disc\(\s*[es]\s*\)\s*&&\s*options_bullet_high\(\s*\)",
-        ent,
-    ):
-        return fail("HIGH must restore 8659 colour-walk on lead discs only")
-    if ent.count("ebullet_lead_high(e)") < 3:
-        return fail("type 20, 41, and 37/38/42/43 arms must all gate 8659 on vis")
+    apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)")
+    if not apply:
+        return fail("ebullet_apply_vis missing")
+    if "options_bullet_high" not in apply or "0x8F" not in apply:
+        return fail("apply_vis: HIGH 8659 / NORMAL 0x8F")
+    if mentions_skill(apply):
+        return fail("apply_vis must not consult skill")
+    if ent.count("ebullet_apply_vis(e)") + ent.count("ebullet_apply_vis(c)") < 6:
+        return fail("apply_vis must run at every arming and per-frame colour site")
     v20 = handler_arm(ent, "20")
     if not v20:
         return fail("type 20 update arm not found")
-    if "spr_set_sat_col" in v20 and not vis_gated(v20):
-        return fail("type 20 8659 must gate on BULLET VISIBILITY (not skill, not always-on)")
+    if "ebullet_apply_vis" not in v20:
+        return fail("type 20 must apply_vis")
     if mentions_skill(v20):
         return fail("type 20 colour must not consult skill")
     v41 = handler_arm(ent, "41")
     if not v41:
         return fail("type 41 update arm not found")
-    if "spr_set_sat_col" in v41 and not vis_gated(v41):
-        return fail("type 41 8659 must gate on BULLET VISIBILITY (not skill, not always-on)")
+    if "ebullet_apply_vis" not in v41:
+        return fail("type 41 must apply_vis")
     if mentions_skill(v41):
         return fail("type 41 colour must not consult skill")
-    if re.search(
-        r"if \(e->variant == 45\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
-        return fail("type 45 must not 8659 (size pulse, colour 0x8F)")
-    print("  KEEP: type 21 HIGH 8659; leads+21 NORMAL white; type 45 no walk")
+    print("  KEEP: one 8659 in apply_vis; NORMAL white; HIGH cycle; type 45 included")
     print("  vis vs skill: NORMAL white on Easy+Hard; HIGH cycle on Easy+Hard")
 
     want = fn_span(ent, "static u8 proj_tile_want(const Slot *s)")
@@ -253,11 +228,9 @@ def main() -> int:
         want,
     ):
         return fail("lead discs must not bank on PAL2[4] (default white)")
-    if "ebullet_lead_disc" in want and "return 15" not in want:
-        return fail("lead discs must key the bank on baked nibble 15 (white)")
-    if "ebullet_type21" in want and "return 15" not in want:
-        return fail("NORMAL type 21 must bank on nibble 15 (white), not leftover 4")
-    print("  proj_tile_want: HIGH type 21 -> nibble 4; NORMAL 21/leads -> 15 white")
+    if "ebullet_bolinha" in want and "return 15" not in want:
+        return fail("NORMAL bolinha must key the bank on baked nibble 15 (white)")
+    print("  proj_tile_want: HIGH bolinha -> nibble 4; NORMAL -> 15 white")
 
     up = fn_span(ent, "static void spr_upload_color(Slot *s)")
     if not up:
@@ -271,11 +244,11 @@ def main() -> int:
         up,
     ):
         return fail("spr_upload_color must not paint leads onto PAL2[4]")
-    if "ebullet_lead_disc" in up and "want = 15" not in up:
-        return fail("spr_upload_color must force lead discs to nibble 15")
-    if "ebullet_lead_disc" not in up.split("paint_bar")[-1] and "ebullet_type21" not in up:
-        return fail("spr_upload_color must paint_all lead discs (packed-15 isolation)")
-    print("  spr_upload_color: HIGH type 21 paint_all PAL2[4]; NORMAL leads/21 paint_all 15")
+    if "ebullet_bolinha" in up and "want = 15" not in up:
+        return fail("spr_upload_color must force NORMAL bolinha to nibble 15")
+    if "ebullet_bolinha" not in up.split("paint_bar")[-1] and "paint_bar" not in up:
+        return fail("spr_upload_color must paint_all bolinhas (packed-15 isolation)")
+    print("  spr_upload_color: HIGH paint_all PAL2[4]; NORMAL paint_all 15")
 
     paint = fn_span(ent, "static void xor_cram_paint(Slot *s, u8 nib)")
     if not paint:
@@ -289,11 +262,9 @@ def main() -> int:
         return fail("xor_cram_wanted not found")
     if cram_ungated(wanted):
         return fail("lead discs must not CRAM-bind in default (xor_cram_wanted)")
-    if "variant == 45" in wanted:
-        return fail("type 45 must not CRAM-bind")
-    if "ebullet_cram_shot" not in wanted and "variant == 21" not in wanted:
-        return fail("type 21 must still CRAM-bind")
-    print("  xor_cram_wanted: type 21 yes; lead discs no; type 45 no")
+    if "ebullet_cram_shot" not in wanted:
+        return fail("HIGH bolinhas (incl. 21/45) must still CRAM-bind")
+    print("  xor_cram_wanted: HIGH bolinha yes; NORMAL no")
 
     if re.search(r"VDP_allocateTiles\s*\(", ent) or re.search(
         r"VDP_releaseTiles\s*\(", ent

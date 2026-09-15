@@ -74,10 +74,11 @@
  * BULLET VISIBILITY. Independent of SKILL LEVEL / ALC: Easy, Normal,
  * and Hard must not gate or override white vs colour-cycle.
  * Default NORMAL = Japan white bolinha (FRAME_LEAD types
- * 20/37/38/41/42/43, sat_col 0x8F / baked nibble 15). HIGH restores
- * the #136 PAL2[4] 8659 colour-walk on those discs and on type 21
- * FRAME_LIGHT_BAR (Easy k_gun 48/49/52-55 and type-73 base_fire).
- * Skill / ALC never override this. Type 45 stays 0x8F size-pulse.
+ * 20/37/38/41/42/43, FRAME_LIGHT_BAR type 21, type 45 bar/med,
+ * sat_col 0x8F / baked nibble 15). HIGH restores the #136 PAL2[4]
+ * 8659 colour-walk on every one of those (k_gun 48/49/52-55,
+ * box-4 volleys, edge spawners, type-73..79 base_fire).
+ * Skill / ALC never override this.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1

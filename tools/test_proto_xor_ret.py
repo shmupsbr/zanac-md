@@ -283,15 +283,11 @@ def main() -> int:
     else:
         print("  KEEP: type 21 init still no +04")
 
-    if not re.search(
-        r"e->variant == 21(?:\s*&&\s*options_bullet_high\(\))?\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
+    if "ebullet_apply_vis" not in ent:
         fail("type 21 8659 was reverted")
         fails += 1
     else:
-        print("  KEEP: type 21 8659 R-nibble|0x80 on armed visit")
+        print("  KEEP: type 21 8659 via ebullet_apply_vis")
 
     collide = fn_span(ent, "static void collide_player(void)")
     if not collide:

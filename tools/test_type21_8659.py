@@ -117,22 +117,18 @@ def main() -> int:
     if not init:
         fail("init_frag not found")
         return 1
-    if "variant != 21" not in init:
-        fail("init_frag must still skip type 21 +04 (863b)")
+    if "ebullet_apply_vis" not in init:
+        fail("init_frag must arm type 21 colour via ebullet_apply_vis")
         fails += 1
     elif re.search(r"if\s*\(\s*variant\s*==\s*21\s*\)\s*\n\s*e->sat_col", init):
-        fail("init_frag must not invent type 21 +04")
+        fail("init_frag must not invent a private type 21 +04")
         fails += 1
     else:
-        print("  init_frag: type 21 still no +04 (863b)")
+        print("  init_frag: type 21 colour via apply_vis")
 
-    # Active 8659 lives in the shared 21/37/38/42/43/45 8.8 step.
-    if not re.search(
-        r"e->variant == 21\s*&&\s*options_bullet_high\(\)\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
-        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
-        ent,
-    ):
-        fail("type 21 8659 must gate on BULLET VISIBILITY (Easy k_gun cannot bypass)")
+    apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)")
+    if not apply or "options_bullet_high" not in apply:
+        fail("type 21 8659 must gate on BULLET VISIBILITY via apply_vis")
         fails += 1
     else:
         print("  update: type 21 8659 R-nibble|0x80 on HIGH vis")
@@ -140,16 +136,17 @@ def main() -> int:
     # 8659 must run before 4898 (MSX order), still inside the 21-group.
     step = re.search(
         r"e->variant == 21 \|\| e->variant == 37.*?"
-        r"if \(e->variant == 21 && options_bullet_high\(\)\)\s*\n\s*spr_set_sat_col.*?"
+        r"e->variant == 45\).*?"
+        r"ebullet_apply_vis\(e\).*?"
         r"if \(step_88_4898\(e\)\)",
         ent,
         re.S,
     )
     if not step:
-        fail("8659 must sit in the 21/37/38/42/43/45 step before 4898")
+        fail("8659/apply_vis must sit in the 21/37/38/42/43/45 step before 4898")
         fails += 1
     else:
-        print("  update: 8659 before 4898 in the 21-group")
+        print("  update: apply_vis before 4898 in the 21-group")
 
     # KEEP: PR #51 SAT +04; PR #57 cmd 9 dest 0xA6F4 is a 941b jump.
     if "e->sat_col = 0x89" not in ent:
