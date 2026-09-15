@@ -88,7 +88,7 @@ def main() -> int:
     ):
         if kind not in wanted:
             return fail("%s must stay a colour-only CRAM walker" % kind)
-    if "variant == 21" not in wanted:
+    if "variant == 21" not in wanted and "ebullet_cram_shot" not in wanted:
         return fail("type 21 8659 must stay a CRAM walker")
     if "KIND_CIRCLE" in wanted:
         return fail("type 67 83d8 SAT^=0x34 must not CRAM-bind")

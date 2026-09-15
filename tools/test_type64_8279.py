@@ -210,8 +210,8 @@ def main() -> int:
     else:
         print("  spawn_from_type(64): clamp 0x5F")
 
-    # KEEP: type 21 8659; init 863b no +04; lead discs also 8659-walk
-    # (ground bolinha after #135). Type 45 stays 0x8F size-pulse.
+    # KEEP: type 21 8659; init 863b no +04; lead discs stay 0x8F white
+    # (no 8659 / no CRAM). Type 45 stays 0x8F size-pulse.
     if not re.search(
         r"e->variant == 21\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
@@ -241,11 +241,15 @@ def main() -> int:
     ):
         fail("do not apply 8659 to type 45 (size pulse, colour 0x8F)")
         fails += 1
-    elif "ebullet_lead_disc" not in ent:
-        fail("lead discs (20/37/38/41/42/43) must 8659-walk; #135 type-21-only left bolinhas white")
+    elif re.search(
+        r"ebullet_lead_disc\(\s*e\s*\)\s*\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
+        r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
+        ent,
+    ) and "options_bullet_high" not in ent:
+        fail("lead discs must not 8659-walk in default (white lock)")
         fails += 1
     else:
-        print("  KEEP: type 21 8659; lead discs walk; type 45 no 8659")
+        print("  KEEP: type 21 8659; lead discs NORMAL white / HIGH gated; type 45 no 8659")
 
     jump = fn_span(mapc, "static void cmd_script_jump(u8 cmd, const u8 *ops)")
     if not jump:

@@ -7,6 +7,7 @@ static u8 s_skill = SKILL_NORMAL;
 static u8 s_autofire = AUTOFIRE_NORMAL;
 static u8 s_ships = PLAYER_LIVES_INIT;
 static u8 s_extend = EXTEND_EVERY_X;
+static u8 s_bullet_vis = BULLET_VIS_NORMAL;
 static u8 s_bind[3] = {
     FIRE_ROLE_BOTH,
     FIRE_ROLE_PRIMARY,
@@ -73,6 +74,18 @@ u8 options_extend(void)
     return s_extend;
 }
 
+u8 options_bullet_vis(void)
+{
+    if (s_bullet_vis > BULLET_VIS_HIGH)
+        return BULLET_VIS_NORMAL;
+    return s_bullet_vis;
+}
+
+u8 options_bullet_high(void)
+{
+    return (u8)(options_bullet_vis() == BULLET_VIS_HIGH);
+}
+
 u8 options_bind(u8 btn)
 {
     if (btn > OPTIONS_BTN_C)
@@ -98,6 +111,12 @@ void options_nudge_ships(s8 dir)
 void options_nudge_extend(s8 dir)
 {
     s_extend = wrap_u8((s16)s_extend + dir, EXTEND_EVERY_X, EXTEND_NONE);
+}
+
+void options_nudge_bullet_vis(s8 dir)
+{
+    s_bullet_vis = wrap_u8((s16)s_bullet_vis + dir,
+                           BULLET_VIS_NORMAL, BULLET_VIS_HIGH);
 }
 
 void options_cycle_bind(u8 btn, s8 dir)
