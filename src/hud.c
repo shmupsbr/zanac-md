@@ -3,13 +3,25 @@
 #include "mode.h"
 #include "player.h"
 #include "entity.h"
+#include <string.h>
 
 #define HUD_COL         MODE_BAR_COL
 #define HUD_TEXT        (MODE_BAR_COL + 1)
+#define HUD_CACHE_ROWS  28
 
 static u8 s_hud_ready;
 static u8 s_labels_ok;
 static u8 s_time_lbl;
+/* WINDOW HUD cells. Replay of ALC / SCORE / FIRE every tick was a
+ * steady VDP-port tax; leftover-4 / carry then dropped the frame. */
+static u8 s_win_tid[MODE_BAR_W][HUD_CACHE_ROWS];
+static u8 s_win_cache_on;
+
+static void hud_win_cache_reset(void)
+{
+    memset(s_win_tid, 0xFF, sizeof(s_win_tid));
+    s_win_cache_on = 1;
+}
 
 static void hud_fill_bar_backing(void);
 
@@ -50,6 +62,7 @@ static void hud_wipe_window(void)
      * Leave those cells; mode_draw_letterbox restamps opaque PAL0. */
     VDP_fillTileMapRect(WINDOW, trans, 0, 2, MODE_H32_COLS, 26);
     VDP_fillTileMapRect(WINDOW, blank, HUD_COL, 0, MODE_BAR_W, 28);
+    hud_win_cache_reset();
     VDP_fillTileMapRect(BG_A, blank, HUD_COL, 0, MODE_BAR_W, 28);
     VDP_fillTileMapRect(BG_B, blank, HUD_COL, 0, MODE_BAR_W, 32);
     /* WPV=2 makes rows 0-1 full-width WINDOW. Restore the opaque top bar
@@ -73,6 +86,16 @@ static u16 hud_attr(u8 tid)
 
 void hud_put_tile(u16 plane, u16 x, u16 y, u8 tid)
 {
+    if (plane == WINDOW && s_win_cache_on
+        && x >= HUD_COL && x < (u16)(HUD_COL + MODE_BAR_W)
+        && y < HUD_CACHE_ROWS)
+    {
+        u8 *cell = &s_win_tid[x - HUD_COL][y];
+
+        if (*cell == tid)
+            return;
+        *cell = tid;
+    }
     VDP_setTileMapXY(plane, hud_attr(tid), x, y);
 }
 
@@ -307,6 +330,7 @@ void hud_init(void)
     s_hud_ready = 0;
     s_labels_ok = 0;
     s_time_lbl = 0;
+    hud_win_cache_reset();
     if (mode_get() != MODE_ORIGINAL)
         return;
     s_hud_ready = 1;
