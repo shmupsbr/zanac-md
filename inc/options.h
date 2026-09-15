@@ -76,13 +76,13 @@
  * switch is this option, for every enemy and every boss, whole game:
  *   NORMAL (default) = Japan white (0x8F / nibble 15), no 8659.
  *   HIGH = #136 PAL2[4] 8659 colour-walk on the same shots.
- * Scope: FRAME_LEAD 20/37/38/41/42/43, FRAME_LIGHT_BAR 21, type 45
- * bar/med, k_gun 48/49/52-55, box-4 3x38 volleys, edge spawners,
- * type-73..79 base_fire. SGDK-packed FRAME_LEAD nibble 4 must not
- * sit on PAL2[4] when NORMAL. #143 owned new sprites after place
- * but box×3 / boss shots that free_enemy-reuse crate/flyer SAT
- * still had AUTO_TILE_UPLOAD; SPR_update loadTiles then poisoned
- * the (FRAME_LEAD,15) tag and later ticks skipped paint_all.
+ * Scope: FRAME_LEAD discs 20/37/38/41/42/43, type 45 bar/med pulse,
+ * k_gun type-38 children, box-4 3x38 volleys, edge spawners,
+ * type-73..79 FRAME_LEAD / type-45 fire. Type 21 FRAME_LIGHT_BAR
+ * (`<===>`) is Japan 8659 always — it does not enter this switch.
+ * SGDK-packed FRAME_LEAD nibble 4 must not sit on PAL2[4] when
+ * NORMAL. #144 own-after-place / reuse lock stays; do not DMA
+ * paint_all-15 every tick (that is the 3+ white-bolinha slowdown).
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1

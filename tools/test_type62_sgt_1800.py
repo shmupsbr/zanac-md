@@ -192,6 +192,26 @@ def main() -> int:
             fails += 1
         else:
             print("  type62_poke: SGT pack")
+        pack = fn_span(mapc, "static void pack_riser_sgt(u8 phase, u8 nib)")
+        if not pack:
+            fail("pack_riser_sgt missing")
+            fails += 1
+        elif "src + 8" not in pack or "src + 16" not in pack:
+            fail("pack_riser_sgt must map TMS left/right columns")
+            fails += 1
+        else:
+            # Genesis sprites are column-major TL,BL,TR,BR (orb_encode).
+            # tile[1] = src+16 was row-major UR and scrambled Randar.
+            t1 = re.search(r"tile\[1\]\s*=\s*src\s*\+\s*(\d+)", pack)
+            t2 = re.search(r"tile\[2\]\s*=\s*src\s*\+\s*(\d+)", pack)
+            if not t1 or int(t1.group(1)) != 8:
+                fail("pack_riser_sgt tile[1] must be BL (src+8), not UR")
+                fails += 1
+            elif not t2 or int(t2.group(1)) != 16:
+                fail("pack_riser_sgt tile[2] must be TR (src+16)")
+                fails += 1
+            else:
+                print("  pack_riser_sgt: column-major TL,BL,TR,BR")
 
     if "k_riser_nt" in mapc:
         fail("do not keep the nametable-row interpretation (k_riser_nt)")
@@ -217,6 +237,13 @@ def main() -> int:
         fails += 1
     else:
         print("  entity: SGT tiles -> sprite VRAM")
+
+    ensure = fn_span(ent, "static void riser_ensure_spr(Slot *e)")
+    if not ensure or "shot_vram_own" not in ensure:
+        fail("riser_ensure_spr must shot_vram_own so FRAME_BOX cannot overwrite SGT")
+        fails += 1
+    else:
+        print("  riser_ensure_spr: own tiles (no crate overwrite)")
 
     become = fn_span(ent, "static void become_riser(Slot *e)")
     if not become:

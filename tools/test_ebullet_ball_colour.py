@@ -157,7 +157,7 @@ def main() -> int:
         return fail("HIGH must gate lead CRAM; NORMAL stays white")
     if mentions_skill(cram):
         return fail("ebullet_cram_shot must not consult skill/ALC")
-    print("  ebullet_cram_shot: every bolinha HIGH only; NORMAL white")
+    print("  ebullet_cram_shot: discs/45 HIGH only; type 21 always CRAM")
 
     high = fn_span(ent, "static int ebullet_bolinha_high(const Slot *s)")
     if not high:
@@ -171,9 +171,14 @@ def main() -> int:
     boli = fn_span(ent, "static int ebullet_bolinha(const Slot *s)")
     if not boli:
         return fail("ebullet_bolinha must classify every tiro bolinha")
-    if "21" not in boli or "45" not in boli:
-        return fail("ebullet_bolinha must include type 21 and type 45")
-    print("  ebullet_bolinha_high: vis only; skill never gates white vs cycle")
+    if "v == 21" in boli or "== 21" in boli:
+        return fail("type 21 must not be a vis bolinha (Japan 8659 always)")
+    if "45" not in boli:
+        return fail("ebullet_bolinha must include type 45")
+    bar = fn_span(ent, "static int ebullet_light_bar(const Slot *s)")
+    if not bar or "21" not in bar:
+        return fail("ebullet_light_bar must classify type 21")
+    print("  ebullet_bolinha_high: vis discs/45; type 21 always-cycle")
 
     frag = fn_span(ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)")
     if not frag:
@@ -193,6 +198,8 @@ def main() -> int:
     apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)")
     if not apply:
         return fail("ebullet_apply_vis missing")
+    if "ebullet_light_bar" not in apply:
+        return fail("apply_vis must 8659 type 21 via ebullet_light_bar")
     if "options_bullet_high" not in apply or "0x8F" not in apply:
         return fail("apply_vis: HIGH 8659 / NORMAL 0x8F")
     if mentions_skill(apply):

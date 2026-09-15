@@ -127,11 +127,14 @@ def main() -> int:
         print("  init_frag: type 21 colour via apply_vis")
 
     apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)")
-    if not apply or "options_bullet_high" not in apply:
-        fail("type 21 8659 must gate on BULLET VISIBILITY via apply_vis")
+    if not apply or "ebullet_light_bar" not in apply:
+        fail("type 21 8659 must always run via ebullet_light_bar (not vis)")
+        fails += 1
+    elif "options_bullet_high" not in apply:
+        fail("disc/45 8659 must still gate on BULLET VISIBILITY via apply_vis")
         fails += 1
     else:
-        print("  update: type 21 8659 R-nibble|0x80 on HIGH vis")
+        print("  update: type 21 8659 always; discs/45 vis-gated")
 
     # 8659 must run before 4898 (MSX order), still inside the 21-group.
     step = re.search(
