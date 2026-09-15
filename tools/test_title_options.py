@@ -132,6 +132,7 @@ def main() -> int:
         '"AUTOFIRE"',
         '"PLAYER SHIPS"',
         '"PLAYER EXTEND"',
+        '"BULLET VISIBILITY"',
     ):
         if s not in opt_ui:
             fail(f"OPTIONS must list {s}")
@@ -149,6 +150,9 @@ def main() -> int:
     if '"NONE +500000"' not in opt_ui and '"NO EXTENDS"' not in opt_ui:
         fail("PLAYER EXTEND must list NO EXTENDS / NONE +500000")
         fails += 1
+    if '"HIGH"' not in opt_ui:
+        fail("BULLET VISIBILITY must list HIGH")
+        fails += 1
     else:
         print("  title: OPTIONS rows + values")
 
@@ -156,8 +160,11 @@ def main() -> int:
     if "options_nudge_extend" not in upd_opt:
         fail("OPTIONS Left/Right must nudge PLAYER EXTEND")
         fails += 1
-    if "#define OPT_ROWS            5" not in title:
-        fail("OPT_ROWS must be 5 (extend row added)")
+    if "options_nudge_bullet_vis" not in upd_opt:
+        fail("OPTIONS Left/Right must nudge BULLET VISIBILITY")
+        fails += 1
+    if "#define OPT_ROWS            6" not in title:
+        fail("OPT_ROWS must be 6 (bullet visibility row added)")
         fails += 1
 
     keys_ui = fn_span(title, "static void draw_keys_menu(void)") or ""
@@ -322,8 +329,11 @@ def main() -> int:
     if "s_extend = EXTEND_EVERY_X" not in opt_c:
         fail("default PLAYER EXTEND must be EVERY X (stock)")
         fails += 1
+    if "s_bullet_vis = BULLET_VIS_NORMAL" not in opt_c:
+        fail("default BULLET VISIBILITY must be NORMAL (white bolinha)")
+        fails += 1
     else:
-        print("  defaults: Normal skill / Normal autofire / 3 ships / EVERY X")
+        print("  defaults: Normal skill / Normal autofire / 3 ships / EVERY X / bullet NORMAL")
 
     if fails:
         print(f"{fails} FAIL(s)", file=sys.stderr)

@@ -355,8 +355,10 @@
  * Pat 7 FRAME_LEAD (types 20/37/38/41/42/43) is the common small
  * bolinha. Japan init +04 is 0x8F (TMS white, EC). Default play keeps
  * that white lock: no CRAM walk, no 8659 R-nibble animation on the
- * disc. Type 45 stays 0x8F size-pulse. XOR walkers stay on nibble 2
- * (tests forbid 4 in k_xor_cram_nib). */
+ * disc. Type 21 FRAME_LIGHT_BAR still 8659-walks. HIGH OPTIONS
+ * restores the #136 PAL2[4] walk on those discs only. Type 45 stays
+ * 0x8F size-pulse. XOR walkers stay on nibble 2 (tests forbid 4 in
+ * k_xor_cram_nib). */
 #define LIGHTBAR_CRAM_NIB  4
 #define KIND_BOX        4
 #define KIND_DUSTER     10
@@ -782,11 +784,12 @@ static int ebullet_lead_disc(const Slot *s)
 }
 
 /* Type 21 bar owns PAL2[4] CRAM (8659 walk, one bank key).
- * Lead discs stay Japan 0x8F / baked nibble 15 — no colour cycle. */
+ * Lead discs: NORMAL = Japan 0x8F / baked 15 (white lock). HIGH =
+ * the #136 PAL2[4] colour-walk. */
 static int ebullet_cram_shot(const Slot *s)
 {
     if (ebullet_lead_disc(s))
-        return 0;
+        return options_bullet_high();
     return (s->kind == KIND_EBULLET && s->variant == 21);
 }
 
@@ -6304,9 +6307,12 @@ static void update_enemies(void)
              * Type 45 (0x8608): DEC clock/+0x1c before 4898; on 0: R bit0 ?
              * dir += (R&8)-4 + apply_dir_88(speed) : reload 0x28 then DEC (0x27).
              * 8625: SAT +03 = 0x18 + ((clock&1)<<3) every active frame. */
-            /* 8659 R-nibble|0x80. Type 21 Japan. Lead discs stay 0x8F.
-             * Type 45 stays 0x8F size-pulse. */
+            /* 8659 R-nibble|0x80. Type 21 Japan. Lead discs stay 0x8F
+             * in NORMAL; HIGH restores the #136 walk. Type 45 stays
+             * 0x8F size-pulse. */
             if (e->variant == 21)
+                spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+            else if (ebullet_lead_disc(e) && options_bullet_high())
                 spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
             if (e->variant == 45)
             {

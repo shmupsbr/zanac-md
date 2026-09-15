@@ -249,7 +249,7 @@ def main() -> int:
         fail("lead discs must not 8659-walk in default (white lock)")
         fails += 1
     else:
-        print("  KEEP: type 21 8659; lead discs white; type 45 no 8659")
+        print("  KEEP: type 21 8659; lead discs NORMAL white / HIGH gated; type 45 no 8659")
 
     jump = fn_span(mapc, "static void cmd_script_jump(u8 cmd, const u8 *ops)")
     if not jump:

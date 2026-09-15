@@ -113,12 +113,11 @@ def main() -> int:
         return fail("ebullet_cram_shot not found")
     if "variant == 21" not in cram:
         return fail("type 21 must stay a CRAM shot")
-    if not re.search(
-        r"if\s*\(\s*ebullet_lead_disc\s*\([^)]*\)\s*\)\s*\n\s*return 0",
-        cram,
-    ) and cram_ungated(cram):
+    if cram_ungated(cram):
         return fail("default: lead discs must not be CRAM shots (white lock)")
-    print("  ebullet_cram_shot: type 21 yes; leads white-locked")
+    if "options_bullet_high" not in cram:
+        return fail("HIGH must gate lead CRAM; NORMAL stays white")
+    print("  ebullet_cram_shot: type 21 yes; leads NORMAL white / HIGH gated")
 
     frag = fn_span(ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)")
     if not frag:
@@ -153,13 +152,18 @@ def main() -> int:
         ent,
     ) and "options_bullet_high" not in ent:
         return fail("lead discs must not 8659-walk in default (white lock)")
+    if not re.search(
+        r"ebullet_lead_disc\(\s*e\s*\)\s*&&\s*options_bullet_high\(\s*\)",
+        ent,
+    ):
+        return fail("HIGH must restore 8659 colour-walk on lead discs only")
     if re.search(
         r"if \(e->variant == 45\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
     ):
         return fail("type 45 must not 8659 (size pulse, colour 0x8F)")
-    print("  KEEP: type 21 8659; lead discs white; type 45 no walk")
+    print("  KEEP: type 21 8659; leads NORMAL white / HIGH walk; type 45 no walk")
 
     want = fn_span(ent, "static u8 proj_tile_want(const Slot *s)")
     if not want:
@@ -226,6 +230,24 @@ def main() -> int:
     if not re.search(r"k_gun\[5\]\[4\]\s*=\s*\{[^;]*\b38\b[^;]*\b21\b", ent, re.S):
         return fail("k_gun must still fire type 38 (bolinha) and type 21 (cycler)")
     print("  KEEP: k_gun child types 38 / 21")
+
+    opt_c = (ROOT / "src" / "options.c").read_text(encoding="utf-8")
+    opt_h = (ROOT / "inc" / "options.h").read_text(encoding="utf-8")
+    title = (ROOT / "src" / "title.c").read_text(encoding="utf-8")
+    if "s_bullet_vis = BULLET_VIS_NORMAL" not in opt_c:
+        return fail("default BULLET VISIBILITY must be NORMAL (white)")
+    if "BULLET_VIS_NORMAL       0" not in opt_h or "BULLET_VIS_HIGH         1" not in opt_h:
+        return fail("BULLET_VIS_NORMAL=0 / HIGH=1")
+    if "options_bullet_high" not in opt_c or "options_nudge_bullet_vis" not in opt_c:
+        return fail("options must persist BULLET VISIBILITY like other rows")
+    if '"BULLET VISIBILITY"' not in title:
+        return fail("OPTIONS must list BULLET VISIBILITY")
+    opt_ui = fn_span(title, "static void draw_options_menu(void)") or ""
+    if '"NORMAL"' not in opt_ui or '"HIGH"' not in opt_ui:
+        return fail("BULLET VISIBILITY must list NORMAL / HIGH")
+    if "options_nudge_bullet_vis" not in title:
+        return fail("OPTIONS Left/Right must nudge BULLET VISIBILITY")
+    print("  OPTIONS: BULLET VISIBILITY NORMAL (default) / HIGH")
 
     asm = load_asm()
     if asm:

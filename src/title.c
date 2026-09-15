@@ -27,8 +27,8 @@
  * After settle: GAME START / OPTIONS (PAL3 highlight / PAL2 dim).
  * GAME START then the version pick: PLEASE SELECT: / MSX ENHANCED /
  * ZANAC MD. OPTIONS is a second screen (keys / skill / autofire / ships
- * / player extend) in the lower title area under the MD mark, same
- * charset helpers.
+ * / player extend / bullet visibility) in the lower title area under
+ * the MD mark, same charset helpers.
  */
 
 #define TITLE_TILE_BASE     (TILE_USER_INDEX + 32)
@@ -50,7 +50,7 @@
 #define ROW_PICK0           (TITLE_NT0 + 22)
 #define OPT_LAB_COL         3
 #define OPT_VAL_COL         20
-#define OPT_ROWS            5
+#define OPT_ROWS            6
 
 static u8 s_phase;
 static u8 s_sel;            /* 0 Original, 1 Zanac MD */
@@ -453,11 +453,19 @@ static void draw_opt_row(u8 row, const char *lab, const char *val, int on)
 {
     u16 y = (u16)(ROW_CRED0 + row);
     u16 pal = on ? PAL3 : PAL2;
+    u16 vcol = OPT_VAL_COL;
+    u16 n = 0;
 
     paint_black(y, 1);
     draw_str_pal(lab, OPT_LAB_COL, y, pal);
     if (val)
-        draw_str_pal(val, OPT_VAL_COL, y, pal);
+    {
+        while (lab[n])
+            n++;
+        if ((u16)(OPT_LAB_COL + n) >= vcol)
+            vcol = (u16)(OPT_LAB_COL + n + 1);
+        draw_str_pal(val, vcol, y, pal);
+    }
 }
 
 static void draw_main_menu(void)
@@ -490,10 +498,12 @@ static void draw_options_menu(void)
         "60000 TWICE",
         "NONE +500000"
     };
+    static const char *k_bvis[2] = { "NORMAL", "HIGH" };
     char ships[2];
     u8 sk = options_skill();
     u8 af = options_autofire();
     u8 ex = options_extend();
+    u8 bv = options_bullet_vis();
 
     ships[0] = (char)('0' + options_player_ships());
     ships[1] = 0;
@@ -503,6 +513,8 @@ static void draw_options_menu(void)
         af = AUTOFIRE_NORMAL;
     if (ex > EXTEND_NONE)
         ex = EXTEND_EVERY_X;
+    if (bv > BULLET_VIS_HIGH)
+        bv = BULLET_VIS_NORMAL;
 
     paint_black((u16)ROW_CRED0, (u16)(28 - ROW_CRED0));
     fill_letterbox();
@@ -511,7 +523,8 @@ static void draw_options_menu(void)
     draw_opt_row(2, "AUTOFIRE", k_auto[af], s_sel == 2);
     draw_opt_row(3, "PLAYER SHIPS", ships, s_sel == 3);
     draw_opt_row(4, "PLAYER EXTEND", k_extend[ex], s_sel == 4);
-    draw_str_pal("B BACK", OPT_LAB_COL, (u16)(ROW_CRED0 + 6), PAL2);
+    draw_opt_row(5, "BULLET VISIBILITY", k_bvis[bv], s_sel == 5);
+    draw_str_pal("B BACK", OPT_LAB_COL, (u16)(ROW_CRED0 + 7), PAL2);
 }
 
 static void draw_keys_menu(void)
@@ -668,6 +681,8 @@ static void update_options(u16 pressed)
             options_nudge_ships(dir);
         else if (s_sel == 4)
             options_nudge_extend(dir);
+        else if (s_sel == 5)
+            options_nudge_bullet_vis(dir);
         draw_options_menu();
     }
     if (fire_edge(pressed))

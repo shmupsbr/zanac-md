@@ -70,16 +70,28 @@
 #define EXTEND_NONE             9
 #define EXTEND_MODE_MAX         EXTEND_NONE
 
+/*
+ * BULLET VISIBILITY. Default NORMAL = Japan white bolinha (FRAME_LEAD
+ * types 20/37/38/41/42/43, sat_col 0x8F / baked nibble 15). HIGH
+ * restores the #136 PAL2[4] 8659 colour-walk on those discs only.
+ * Type 21 FRAME_LIGHT_BAR still cycles in both modes.
+ */
+#define BULLET_VIS_NORMAL       0
+#define BULLET_VIS_HIGH         1
+
 u8   options_skill(void);
 u8   options_autofire(void);
 u8   options_player_ships(void);
 u8   options_extend(void);
+u8   options_bullet_vis(void);
+u8   options_bullet_high(void);
 u8   options_bind(u8 btn);
 
 void options_nudge_skill(s8 dir);
 void options_nudge_autofire(s8 dir);
 void options_nudge_ships(s8 dir);
 void options_nudge_extend(s8 dir);
+void options_nudge_bullet_vis(s8 dir);
 void options_cycle_bind(u8 btn, s8 dir);
 
 /* Easy: cap effective pos at ALC_HALF_RANK. Hard/Normal: unchanged. */
