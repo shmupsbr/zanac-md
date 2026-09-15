@@ -347,11 +347,17 @@
 #define KIND_FIRE       3
 /* Fire 0/1/2/7 72de owns PAL2[13]. Shot-bank keys use the same index. */
 #define FIRE7_CRAM_NIB  13
-/* Type 21 8659 colour-walk. Pat 6 is a short 15x5 bar (the colour-cycling
- * enemy shot Filipe called bolinha). Bind every nonzero body nibble to
- * PAL2[4] once and cycle CRAM so bars share one shot-bank key.
- * Do not verbatim-DMA baked-4: SGDK may pack the index off 4 onto 15
- * (TMS white), and PAL2[4] then pulses while the shot stays white.
+/* Type 21 8659 colour-walk. Pat 6 is a short 15x5 bar. Bind every
+ * nonzero body nibble to PAL2[4] once and cycle CRAM so bars share one
+ * shot-bank key. Do not verbatim-DMA baked-4: SGDK may pack the index
+ * off 4 onto 15 (TMS white), and PAL2[4] then pulses while the shot
+ * stays white.
+ * Pat 7 FRAME_LEAD (types 20/37/38/41/42/43) is the common small
+ * ground/floor bolinha. Japan init +04 is 0x8F, but after #132/#133 the
+ * shot bank keys every lead on baked nibble 15 and later sprites inherit
+ * white tiles — Filipe: always white, while type 21 / flyers / bosses
+ * still look coloured. Paint_all onto PAL2[4] and 8659-walk with the
+ * bars (draw-only; 44A6/44BA unchanged). Type 45 stays 0x8F size-pulse.
  * XOR walkers stay on nibble 2 (tests forbid 4 in k_xor_cram_nib). */
 #define LIGHTBAR_CRAM_NIB  4
 #define KIND_BOX        4
@@ -739,8 +745,8 @@ static const u8 k_frame_color[FRAME_N];
 
 /*
  * Dense KIND_SHOT / KIND_FIRE / KIND_EBULLET: same SAT name + nibble
- * every lifetime (leads 0x8F, player shots 0x8F, fire after 72de bind,
- * type 21 after LIGHTBAR_CRAM_NIB bind). Each spr_place used to AUTO_VRAM
+ * every lifetime (player shots 0x8F, fire after 72de bind, type 21 and
+ * lead discs after LIGHTBAR_CRAM_NIB bind). Each spr_place used to AUTO_VRAM
  * + DMA 32-128 B. A 7-frag umber burst was ~900 B plus 7 tile-allocator
  * hits in one tick. Bank the first upload and SPR_setVRAMTileIndex later
  * sprites at that index (no DMA). Filipe's SGDK 2.11 has no public
@@ -764,15 +770,34 @@ static int shot_art_shareable(const Slot *s)
             || s->kind == KIND_EBULLET);
 }
 
+/* Pat 7 disc (20/37/38/41/42/43). Not type 21 bar, not type 45 pulse. */
+static int ebullet_lead_disc(const Slot *s)
+{
+    u8 v;
+
+    if (s->kind != KIND_EBULLET)
+        return 0;
+    v = (u8)(s->variant & 0x7F);
+    return (v == 20 || v == 37 || v == 38
+            || v == 41 || v == 42 || v == 43);
+}
+
+/* Type 21 bar + lead discs share PAL2[4] CRAM (8659 walk, one bank key). */
+static int ebullet_cram_shot(const Slot *s)
+{
+    return (s->kind == KIND_EBULLET && s->variant == 21)
+        || ebullet_lead_disc(s);
+}
+
 static u8 proj_tile_want(const Slot *s)
 {
     u8 baked;
     u8 want;
 
-    /* Type 21 keys the bank on PAL2[4] even before xor_cram_bind.
-     * Leftover sat_col 0x8F (previous lead) would otherwise bank
-     * (LIGHT_BAR, 15) and leave 8659 cycling an unused CRAM slot. */
-    if (s->kind == KIND_EBULLET && s->variant == 21)
+    /* Type 21 and lead discs key the bank on PAL2[4] even before
+     * xor_cram_bind. Leftover sat_col 0x8F would otherwise bank
+     * (LIGHT_BAR/LEAD, 15) and leave 8659 cycling an unused CRAM slot. */
+    if ((s->kind == KIND_EBULLET && s->variant == 21) || ebullet_lead_disc(s))
         return LIGHTBAR_CRAM_NIB;
     if (s->cram_nib)
         return s->cram_nib;
@@ -792,9 +817,9 @@ static u8 proj_tile_want(const Slot *s)
 
 static int shot_vram_cacheable(const Slot *s, u8 want)
 {
-    /* All shots/fire/ebullets, including type 21 light bars. Colour-only
-     * walks bind CRAM (LIGHTBAR_CRAM_NIB / XOR nibble) so the bank key
-     * stays one (frame, nibble), not 16 R-walk keys. */
+    /* All shots/fire/ebullets, including type 21 bars and lead discs.
+     * Colour-only walks bind CRAM (LIGHTBAR_CRAM_NIB / XOR nibble) so
+     * the bank key stays one (frame, nibble), not 16 R-walk keys. */
     (void)want;
     return shot_art_shareable(s);
 }
@@ -825,6 +850,11 @@ static void shot_vram_point(Sprite *sp, u16 idx)
     if (!sp)
         return;
     SPR_setAutoTileUpload(sp, FALSE);
+#ifdef SPR_FLAG_NEED_TILES_UPLOAD
+    /* setAnimAndFrame may have armed this while AUTO was still on.
+     * SPR_update would DMA packed nibble 15 over the shared CRAM tiles. */
+    sp->status &= (u16)~SPR_FLAG_NEED_TILES_UPLOAD;
+#endif
     SPR_setVRAMTileIndex(sp, (s16)idx);
 }
 
@@ -1636,7 +1666,7 @@ static void spr_upload_color(Slot *s)
      * keeps +04 colour. FRAME_LOGA_C is unfolded as black (marker art),
      * but Japan draws those bits in sat_col. Other 71f6 pairs stay
      * primary+black at the same draw (Y-0x11 / same X). */
-    if (s->kind == KIND_EBULLET && s->variant == 21)
+    if ((s->kind == KIND_EBULLET && s->variant == 21) || ebullet_lead_disc(s))
         want = LIGHTBAR_CRAM_NIB;
     else if (s->cram_nib)
         want = s->cram_nib;
@@ -1666,9 +1696,9 @@ static void spr_upload_color(Slot *s)
     if (s->vram_fr == s->frame && dma_nibble_defer())
         return;
     /* Shared shot/lead/bar VRAM: retarget attribut, no DMA.
-     * Type 21 still paint_all after retarget — a prior verbatim
-     * (LIGHT_BAR, 4) bank may hold packed nibble 15. */
-    if (s->kind == KIND_EBULLET && s->variant == 21)
+     * Type 21 / lead discs still paint_all after retarget — a prior
+     * verbatim (frame, 4) bank may hold packed nibble 15. */
+    if (ebullet_cram_shot(s))
         (void)shot_vram_prepare(s, want, (u8)ts->numTile);
     else if (shot_vram_prepare(s, want, (u8)ts->numTile))
         return;
@@ -1683,10 +1713,10 @@ static void spr_upload_color(Slot *s)
     {
         u8 disc = (u8)(s->kind == KIND_EXPL || s->kind == KIND_PDEAD
                        || s->kind == KIND_HUSK);
-        /* Type 21 CRAM: paint every nonzero nibble onto PAL2[4]. A
-         * want==baked verbatim upload leaves SGDK-packed index 15
-         * (white) in VRAM while 8659 cycles the unused PAL2[4]. */
-        u8 paint_bar = (u8)(s->kind == KIND_EBULLET && s->variant == 21);
+        /* Type 21 / lead-disc CRAM: paint every nonzero nibble onto
+         * PAL2[4]. A want==baked verbatim upload leaves SGDK-packed
+         * index 15 (white) in VRAM while 8659 cycles unused PAL2[4]. */
+        u8 paint_bar = (u8)ebullet_cram_shot(s);
 
         /* Verbatim tiles: queue ROM/FAR src. Skip the 128-byte copy
          * into a DMA scratch (and do not allocateAndQueue an unused buf). */
@@ -2743,6 +2773,8 @@ static void spawn_ebullet_dir(s16 x, s16 y, u8 dir)
     e->hp = 1;
     e->timer = 0;
     e->script = 0;
+    e->cram_nib = 0;
+    e->cram_col = 0;
     e->x = x;
     e->y = y;
     apply_dir(e, dir);
@@ -3574,6 +3606,8 @@ static void spawn_lead20(s16 x, s16 y)
      * Xvel 8.8 from one R. */
     type20_init_vel(c);
     c->alive = 1;
+    c->cram_nib = 0;
+    c->cram_col = 0;
     c->sat_col = 0x8F;          /* 8672 +04; TMS EC bit7 */
     spr_place(c, FRAME_LEAD);
 }
@@ -4044,6 +4078,8 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     e->script = 0;
     e->ground = 0;
     e->dest = 0;
+    e->cram_nib = 0;
+    e->cram_col = 0;
     e->x = x;
     e->y = y;
     apply_dir(e, dir);
@@ -5394,6 +5430,8 @@ static int spawn_from_type(u8 t)
         e->y = 0;
         type20_init_vel(e);
         e->alive = 1;
+        e->cram_nib = 0;
+        e->cram_col = 0;
         e->sat_col = 0x8F;      /* 8672 +04; TMS EC bit7 */
         spr_place(e, FRAME_LEAD);
     }
@@ -6236,6 +6274,7 @@ static void update_enemies(void)
              * hole: s32 X lived past 0xD1; Y wrap re-entered). */
             if ((u8)e->y != 0xFF)
                 e->bind = (u16)(e->bind + 0x000C);
+            spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
             if (step_88_4898(e))
                 continue;
             spr_sync_proj(e);
@@ -6252,10 +6291,17 @@ static void update_enemies(void)
              * 4898 / 44ba. Init 863b still writes no +04. spr_kill zeros
              * sat_col; without 8659 EC never arms and the bar draws 32px
              * right of SAT X.
+             * Lead discs (37/38/42/43): Japan init +04=0x8F, no 8659. After
+             * #133 the shot bank keyed (LEAD, 15) and every later bolinha
+             * inherited white tiles. Walk +04 with 8659 (draw-only; 44A6).
              * Type 45 (0x8608): DEC clock/+0x1c before 4898; on 0: R bit0 ?
              * dir += (R&8)-4 + apply_dir_88(speed) : reload 0x28 then DEC (0x27).
              * 8625: SAT +03 = 0x18 + ((clock&1)<<3) every active frame. */
+            /* 8659 R-nibble|0x80. Type 21 Japan; lead discs after #133
+             * were stuck on banked nibble 15 white. Type 45 stays 0x8F. */
             if (e->variant == 21)
+                spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
+            else if (ebullet_lead_disc(e))
                 spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
             if (e->variant == 45)
             {
@@ -6305,6 +6351,7 @@ static void update_enemies(void)
                     heading = (u8)((heading + 1) & 15);
             }
             e->aux = (u8)((count << 5) | (meta & 0x10) | heading);
+            spr_set_sat_col(e, (u8)(0x80 | (rnd() & 0x0F)));
             hd = (u8)(heading & 15);
             ih = (u8)((seed & 0x10)
                 ? ((seed + 0xFC) & 15)
@@ -6996,7 +7043,7 @@ static void xor_cram_release(Slot *s)
     if (!s->cram_nib)
         return;
     if (s->cram_nib == LIGHTBAR_CRAM_NIB
-        && s->kind == KIND_EBULLET && s->variant == 21)
+        && ebullet_cram_shot(s))
     {
         if (s_bar_cram_refs)
             s_bar_cram_refs--;
@@ -7025,10 +7072,10 @@ static u8 xor_cram_alloc(const Slot *s)
 
     if (!k)
         return 0;
-    /* Type 21 always binds PAL2[4] (baked FRAME_LIGHT_BAR). Do not sit
-     * in the XOR walker pool — nibble 2 is exclusive-per-kind and would
-     * miss when SIG/FLASH already owns it, falling back to 16-key remap. */
-    if (s->kind == KIND_EBULLET && s->variant == 21)
+    /* Type 21 bars and lead discs always bind PAL2[4] (LIGHT_BAR bake /
+     * lead paint_all). Do not sit in the XOR walker pool — nibble 2 is
+     * exclusive-per-kind and would miss when SIG/FLASH already owns it. */
+    if (ebullet_cram_shot(s))
     {
         s_bar_cram_refs++;
         return LIGHTBAR_CRAM_NIB;
@@ -7054,7 +7101,7 @@ static u8 sat_col_tile_nibble(const Slot *s, u8 want)
         return NIB_8D_ALIAS;
     }
     if (want == LIGHTBAR_CRAM_NIB
-        && !(s->kind == KIND_EBULLET && s->variant == 21))
+        && !ebullet_cram_shot(s))
         return NIB_8D_ALIAS;
     return want;
 }
@@ -7081,6 +7128,8 @@ static int xor_cram_wanted(const Slot *s)
         || s->kind == KIND_HUSK)
         return 1;
     if (s->kind == KIND_EBULLET && s->variant == 21)
+        return 1;
+    if (ebullet_lead_disc(s))
         return 1;
     return 0;
 }
@@ -7129,10 +7178,10 @@ static int xor_cram_bind(Slot *s, u8 col)
 
     if (!xor_cram_wanted(s))
         return 0;
-    /* Type 21 8659 must CRAM even while the hardware sprite is deferred
-     * (letterbox). Later spr_place reads cram_nib so bars bank on nibble 4
-     * instead of 16 R-walk keys. */
-    if (s->kind == KIND_EBULLET && s->variant == 21)
+    /* Type 21 / lead-disc 8659 must CRAM even while the hardware sprite
+     * is deferred (letterbox). Later spr_place reads cram_nib so shots
+     * bank on nibble 4 instead of 16 R-walk keys. */
+    if ((s->kind == KIND_EBULLET && s->variant == 21) || ebullet_lead_disc(s))
     {
         if (!s->cram_nib)
             nib = xor_cram_alloc(s);

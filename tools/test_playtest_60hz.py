@@ -177,6 +177,8 @@ def main() -> int:
     )
     if not wantp or "variant == 21" not in wantp.group(1) or "LIGHTBAR_CRAM_NIB" not in wantp.group(1):
         return fail("type 21 must bank on LIGHTBAR_CRAM_NIB, not leftover sat_col 15")
+    if "ebullet_lead_disc" not in wantp.group(1):
+        return fail("lead discs must bank on LIGHTBAR_CRAM_NIB, not baked nibble 15")
     cache = re.search(
         r"static int shot_vram_cacheable\(const Slot \*s, u8 want\)\s*\{(.*?)^\}",
         ent,
