@@ -1,35 +1,16 @@
 #!/usr/bin/env python3
-"""Ground/floor 'tiro bolinha' colour vs Japan SAT + MD shot bank.
+"""Ground/floor 'tiro bolinha' stays white (Japan +04 0x8F).
 
-Playtest after #135: 'Ainda tá errado: Inimigos (de chão e de solo), o
-tiro bolinha (o pequeno, mais comum), é SEMPRE branco. Um inimigo de
-chão está disparando tiros que mudam de cor, e os boss e inimigos
-voadores estão disparando tiros coloridos.'
+Filipe after #136: the common small bolinha colour-cycled. He wants the
+OLD white behaviour back: Pat 7 FRAME_LEAD types 20/37/38/41/42/43 stay
+solid TMS white (sat_col 0x8F / baked nibble 15). No CRAM walk, no 8659
+R-nibble animation on the disc.
 
-Japan v1 (SHA1 46e9ed7b7f6dfda8eee266476c9ebc4dd9d8fcc2):
-
-  Pat 7 FRAME_LEAD is the 4x5 disc — the common small bolinha.
-  Types 20 / 37 / 38 / 41 / 42 / 43. Init +04 = 0x8F at 8672 / 84eb /
-  8513 / 8539 (TMS 15 white, EC). No 8659 in the armed path.
-  Ground guns 46/47 and 50/51 8ddb type 38; luster 16/17, umber 7,
-  wide 84, box-4 drop also type 38.
-
-  Pat 6 FRAME_LIGHT_BAR is the short 15x5 colour-cycling shot (type 21).
-  Active 8659: LD A,R / AND 0x0F / OR 0x80 / +04. Filipe: ONE ground
-  enemy (guns 48/49 Y-track) already looks right; do not break it.
-  Type 45 850b is 0x8F; 8625 pulses SAT name, not colour.
-
-#135 painted type 21 onto PAL2[4] and left leads on Japan 0x8F. After
-#132/#133 the shot VRAM bank keys (FRAME_LEAD, baked 15) and later
-sprites inherit those white tiles — the common ground disc stays white
-even when a coloured sat_col would have remapped.
-
-Fix: paint_all lead discs onto LIGHTBAR_CRAM_NIB (same as type 21),
-key the bank on nibble 4, 8659-walk +04 (draw-only). Type 45 stays
-0x8F. 44A6/44BA / ebullet_hits_player unchanged. No VDP_*Tiles.
+Pat 6 FRAME_LIGHT_BAR (type 21) still 8659-walks on PAL2[4] — that is a
+different art. Type 45 stays 0x8F size-pulse.
 
 KEEP: init 20/37/38/41/42/43 +04=0x8F (EC); type 21 init no +04;
-8659 still on type 21; gun k_gun colours; flyer/boss type 21.
+8659 still on type 21; gun k_gun colours; 44A6/44BA; no VDP_*Tiles.
 
 Usage (from zanac-md):
     python tools/test_ebullet_ball_colour.py
@@ -92,6 +73,22 @@ def frame_hist(im, idx: int) -> dict[int, int]:
     return h
 
 
+def cram_ungated(body: str) -> bool:
+    """Lead discs on a CRAM/8659 path with no HIGH-visibility gate."""
+    if "ebullet_lead_disc" not in body:
+        return False
+    if "options_bullet_high" in body or "BULLET_VIS_HIGH" in body:
+        return False
+    if "return 0" in body and "ebullet_lead_disc" in body:
+        # Classifier that explicitly refuses leads is a white lock.
+        if re.search(
+            r"if\s*\(\s*ebullet_lead_disc\s*\([^)]*\)\s*\)\s*\n\s*return 0",
+            body,
+        ):
+            return False
+    return True
+
+
 def main() -> int:
     ent = ENT.read_text(encoding="utf-8")
 
@@ -110,6 +107,18 @@ def main() -> int:
     if "21" in lead.split("return")[0] and "== 21" in lead:
         return fail("type 21 is the bar, not the lead disc")
     print("  ebullet_lead_disc: 20/37/38/41/42/43")
+
+    cram = fn_span(ent, "static int ebullet_cram_shot(const Slot *s)")
+    if not cram:
+        return fail("ebullet_cram_shot not found")
+    if "variant == 21" not in cram:
+        return fail("type 21 must stay a CRAM shot")
+    if not re.search(
+        r"if\s*\(\s*ebullet_lead_disc\s*\([^)]*\)\s*\)\s*\n\s*return 0",
+        cram,
+    ) and cram_ungated(cram):
+        return fail("default: lead discs must not be CRAM shots (white lock)")
+    print("  ebullet_cram_shot: type 21 yes; leads white-locked")
 
     frag = fn_span(ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)")
     if not frag:
@@ -138,37 +147,51 @@ def main() -> int:
         ent,
     )) != 1:
         return fail("type 21 8659 must stay a single write")
-    if "ebullet_lead_disc" not in ent or not re.search(
+    if re.search(
         r"ebullet_lead_disc\(\s*e\s*\)\s*\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
-    ):
-        return fail("lead discs must 8659-walk (draw-only) so bolinhas are not stuck white")
+    ) and "options_bullet_high" not in ent:
+        return fail("lead discs must not 8659-walk in default (white lock)")
     if re.search(
         r"if \(e->variant == 45\)\s*\n\s*spr_set_sat_col\(\s*e,\s*"
         r"\(u8\)\(0x80\s*\|\s*\(rnd\(\)\s*&\s*0x0F\)\)\)",
         ent,
     ):
         return fail("type 45 must not 8659 (size pulse, colour 0x8F)")
-    print("  KEEP: type 21 8659; lead discs walk; type 45 no walk")
+    print("  KEEP: type 21 8659; lead discs white; type 45 no walk")
 
     want = fn_span(ent, "static u8 proj_tile_want(const Slot *s)")
     if not want:
         return fail("proj_tile_want not found")
-    if "variant == 21" not in want or "LIGHTBAR_CRAM_NIB" not in want:
+    if "variant == 21" not in want and "ebullet_cram_shot" not in want:
         return fail("type 21 must bank on nibble 4, not leftover sat_col 15")
-    if "ebullet_lead_disc" not in want:
-        return fail("lead discs must bank on nibble 4, not baked 15")
-    print("  proj_tile_want: type 21 + lead discs -> LIGHTBAR_CRAM_NIB")
+    if "LIGHTBAR_CRAM_NIB" not in want:
+        return fail("type 21 must bank on LIGHTBAR_CRAM_NIB")
+    if re.search(
+        r"ebullet_lead_disc\s*\([^)]*\)\s*\)\s*\n\s*return LIGHTBAR_CRAM_NIB",
+        want,
+    ):
+        return fail("lead discs must not bank on PAL2[4] (default white)")
+    if "ebullet_lead_disc" in want and "return 15" not in want:
+        return fail("lead discs must key the bank on baked nibble 15 (white)")
+    print("  proj_tile_want: type 21 -> nibble 4; leads -> 15 white")
 
     up = fn_span(ent, "static void spr_upload_color(Slot *s)")
     if not up:
         return fail("spr_upload_color not found")
     if "paint_bar" not in up:
         return fail("spr_upload_color must paint_all CRAM shots")
-    if "ebullet_lead_disc" not in up and "ebullet_cram_shot" not in up:
-        return fail("lead discs must paint_all onto PAL2[4], not verbatim baked-15")
-    print("  spr_upload_color: type 21 + leads paint_all, no verbatim baked-15")
+    if "ebullet_cram_shot" not in up:
+        return fail("spr_upload_color must paint_all type 21 onto PAL2[4]")
+    if re.search(
+        r"ebullet_lead_disc\s*\([^)]*\)\s*\n\s*want = LIGHTBAR_CRAM_NIB",
+        up,
+    ):
+        return fail("spr_upload_color must not paint leads onto PAL2[4]")
+    if "ebullet_lead_disc" in up and "want = 15" not in up:
+        return fail("spr_upload_color must force lead discs to nibble 15")
+    print("  spr_upload_color: type 21 paint_all; leads verbatim 15")
 
     paint = fn_span(ent, "static void xor_cram_paint(Slot *s, u8 nib)")
     if not paint:
@@ -178,11 +201,15 @@ def main() -> int:
     print("  xor_cram_paint: paint_all")
 
     wanted = fn_span(ent, "static int xor_cram_wanted(const Slot *s)")
-    if not wanted or "ebullet_lead_disc" not in wanted:
-        return fail("lead discs must CRAM-bind (xor_cram_wanted)")
+    if not wanted:
+        return fail("xor_cram_wanted not found")
+    if cram_ungated(wanted):
+        return fail("lead discs must not CRAM-bind in default (xor_cram_wanted)")
     if "variant == 45" in wanted:
         return fail("type 45 must not CRAM-bind")
-    print("  xor_cram_wanted: lead discs yes; type 45 no")
+    if "ebullet_cram_shot" not in wanted and "variant == 21" not in wanted:
+        return fail("type 21 must still CRAM-bind")
+    print("  xor_cram_wanted: type 21 yes; lead discs no; type 45 no")
 
     if re.search(r"VDP_allocateTiles\s*\(", ent) or re.search(
         r"VDP_releaseTiles\s*\(", ent
@@ -220,7 +247,7 @@ def main() -> int:
         from PIL import Image
     except ImportError:
         print("  (Pillow missing; skip objs.png hist)")
-        print("ok: lead discs paint_all PAL2[4] + 8659 walk; type 21 KEEP")
+        print("ok: lead discs white (nibble 15 / 0x8F); type 21 KEEP")
         return 0
 
     if not PNG.is_file():
@@ -239,7 +266,7 @@ def main() -> int:
     if lead_body[15] < 8 or lead_body[15] > 24:
         return fail("FRAME_LEAD should be a small disc (~14 px), got %d" % lead_body[15])
     print("  objs.png: LEAD nibble 15 disc; LIGHT_BAR nibble 4 bar")
-    print("ok: lead discs paint_all PAL2[4] + 8659 walk; type 21 KEEP")
+    print("ok: lead discs white (nibble 15 / 0x8F); type 21 KEEP")
     return 0
 
 

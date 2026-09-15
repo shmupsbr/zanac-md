@@ -104,7 +104,7 @@ def main() -> int:
             return fail("%s must be a CRAM walker" % kind)
     if "KIND_CIRCLE" in wanted:
         return fail("type 67 83d8 SAT^=0x34 is not a colour-only walker")
-    if "variant == 21" not in wanted:
+    if "variant == 21" not in wanted and "ebullet_cram_shot" not in wanted:
         return fail("type 21 8659 random colour must CRAM")
     if "LIGHTBAR_CRAM_NIB" not in ent:
         return fail("type 21 must own a dedicated CRAM nibble (not XOR pool 2)")
@@ -116,7 +116,7 @@ def main() -> int:
     bind = fn_span(ent, "static int xor_cram_bind(Slot *s, u8 col)")
     if not bind:
         return fail("xor_cram_bind not found")
-    if "variant == 21" not in bind:
+    if "variant == 21" not in bind and "ebullet_cram_shot" not in bind:
         return fail("type 21 must CRAM-bind even without a hardware sprite")
     if "xor_cram_cycle" not in setc:
         return fail("spr_set_sat_col must CRAM-cycle after bind")
@@ -153,11 +153,16 @@ def main() -> int:
     print("  xor_cram_paint: paint_all onto CRAM nibble")
 
     want = fn_span(ent, "static u8 proj_tile_want(const Slot *s)")
-    if not want or "LIGHTBAR_CRAM_NIB" not in want or "variant == 21" not in want:
+    if not want or "LIGHTBAR_CRAM_NIB" not in want:
         return fail("proj_tile_want must key type 21 on LIGHTBAR_CRAM_NIB (not leftover 0x8F)")
-    if "ebullet_lead_disc" not in want:
-        return fail("proj_tile_want must key lead discs on LIGHTBAR_CRAM_NIB (not baked 15)")
-    print("  proj_tile_want: type 21 + lead discs always nibble 4")
+    if "variant == 21" not in want and "ebullet_cram_shot" not in want:
+        return fail("proj_tile_want must key type 21 on LIGHTBAR_CRAM_NIB (not leftover 0x8F)")
+    if re.search(
+        r"ebullet_lead_disc\s*\([^)]*\)\s*\)\s*\n\s*return LIGHTBAR_CRAM_NIB",
+        want,
+    ):
+        return fail("lead discs must stay baked nibble 15, not PAL2[4] CRAM")
+    print("  proj_tile_want: type 21 nibble 4; leads stay 15")
 
     point = fn_span(ent, "static void shot_vram_point(Sprite *sp, u16 idx)")
     if not point:
