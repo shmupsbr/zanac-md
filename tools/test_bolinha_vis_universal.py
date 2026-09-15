@@ -255,6 +255,8 @@ def main() -> int:
         return fail("NORMAL lock must share a remembered (FRAME_LEAD,15) bank")
     if "return 0" not in lock_arm:
         return fail("NORMAL lock must return 0 on lookup miss (first paint_all)")
+    if "painted" not in lock_arm and "shot_bank_painted_at" not in lock_arm:
+        return fail("NORMAL lock must not share a verbatim packed-nibble-4 bank")
     print("  shot_vram_prepare: share after paint_all-15; miss still paints")
 
     place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
@@ -307,7 +309,9 @@ def main() -> int:
         return fail("spr_upload_color must skip DMA when (frame,nibble) already matches")
     if "ebullet_normal_lock" in skip.group(0):
         return fail("NORMAL lock must not force per-tick paint_all (3+ volley slowdown)")
-    print("  spr_upload_color: matching-vram skip (own-after-place holds white)")
+    if "shot_vram_white_proven" not in up:
+        return fail("NORMAL skip must require a proven paint_all-15 bank")
+    print("  spr_upload_color: matching-vram skip (proven white bank only)")
     if "dma_nibble_defer" in up and "ebullet_bolinha" not in up[
         max(0, up.find("dma_nibble_defer") - 40) : up.find("dma_nibble_defer") + 80
     ]:

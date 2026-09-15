@@ -766,6 +766,9 @@ typedef struct {
     u8  frame;
     u8  nib;
     u8  ntiles;
+    u8  painted;    /* 1 = remember() after paint_all (every nonzero
+                     * nibble rewritten). Verbatim want==baked DMA of
+                     * FRAME_LEAD still holds packed nibble 4. */
     u16 index;
 } ShotBank;
 static ShotBank s_shot_bank[SHOT_BANK_N];
@@ -915,6 +918,10 @@ static void shot_vram_point(Sprite *sp, u16 idx)
     shot_vram_own(sp);
     SPR_setAutoTileUpload(sp, FALSE);
     SPR_setVRAMTileIndex(sp, (s16)idx);
+    /* setVRAMTileIndex ORs NEED_TILES_UPLOAD when AUTO_TILE_UPLOAD
+     * is on. Own again so SPR_update cannot loadTiles packed nibble 4
+     * into a shared white bank. */
+    shot_vram_own(sp);
 }
 
 /* Bank owns these tiles until SPR_reset. Do not SPR_setVRAMTileIndex:
@@ -938,6 +945,7 @@ static int shot_vram_fresh_auto(Sprite *sp)
     if (!SPR_setVRAMTileIndex(sp, -1))
         return 0;
     SPR_setAutoTileUpload(sp, FALSE);
+    shot_vram_own(sp);
     return 1;
 }
 
@@ -949,17 +957,86 @@ static void shot_vram_reset(void)
     memset(s_shot_bank, 0, sizeof(s_shot_bank));
 }
 
-static void shot_vram_remember(Slot *s, u8 want, u8 ntiles)
+/* Proven paint_all-15: every nonzero body nibble is white. A (frame,15)
+ * tag or bank from verbatim packed nibble 4 is not this. Sprite must
+ * actually sit on that index — a leftover vram_nib==15 is not enough. */
+static int shot_vram_white_proven(const Slot *s, u8 want)
 {
     u8 i;
     u16 idx;
 
+    if (!s->spr || want != 15)
+        return 0;
+    idx = (u16)(s->spr->attribut & TILE_INDEX_MASK);
+    for (i = 0; i < SHOT_BANK_N; i++)
+    {
+        if (s_shot_bank[i].used && s_shot_bank[i].painted
+            && s_shot_bank[i].frame == s->frame
+            && s_shot_bank[i].nib == 15
+            && s_shot_bank[i].index == idx)
+            return 1;
+    }
+    return 0;
+}
+
+static int shot_bank_painted_at(u8 frame, u8 nib, u16 idx)
+{
+    u8 i;
+
+    for (i = 0; i < SHOT_BANK_N; i++)
+    {
+        if (s_shot_bank[i].used && s_shot_bank[i].painted
+            && s_shot_bank[i].frame == frame
+            && s_shot_bank[i].nib == nib
+            && s_shot_bank[i].index == idx)
+            return 1;
+    }
+    return 0;
+}
+
+/* Leave a proven white bank before DMA of any other nibble (type 21 /
+ * HIGH 8659 nibble 4). Painting 4 into the (frame,15) index makes
+ * every shared disc colour-cycle on PAL2[4]. */
+static int shot_vram_leave_white(Sprite *sp, u8 frame, u8 nib)
+{
+    u16 cur;
+
+    if (!sp || nib == 15)
+        return 1;
+    cur = (u16)(sp->attribut & TILE_INDEX_MASK);
+    if (!shot_bank_painted_at(frame, 15, cur))
+        return 1;
+    return shot_vram_fresh_auto(sp);
+}
+
+static void shot_vram_remember(Slot *s, u8 want, u8 ntiles, u8 painted)
+{
+    u8 i;
+    u16 cur;
+
     if (!s->spr || !ntiles || !shot_vram_cacheable(s, want))
         return;
-    idx = (u16)(s->spr->attribut & TILE_INDEX_MASK);
-    if (shot_bank_lookup(s->frame, want, &idx))
+    cur = (u16)(s->spr->attribut & TILE_INDEX_MASK);
+    for (i = 0; i < SHOT_BANK_N; i++)
     {
-        shot_vram_point(s->spr, idx);
+        if (!s_shot_bank[i].used || s_shot_bank[i].frame != s->frame
+            || s_shot_bank[i].nib != want)
+            continue;
+        /* #145 retargeted onto the old index after paint_all had just
+         * DMA'd `cur`. If that older bank was verbatim packed nibble 4
+         * tagged as 15, every later disc sat on PAL2[4] and type 21's
+         * 8659 walked them. Keep the sprite on the tiles we painted. */
+        if (painted)
+        {
+            s_shot_bank[i].index = cur;
+            s_shot_bank[i].ntiles = ntiles;
+            s_shot_bank[i].painted = 1;
+            shot_vram_keep_banked(s->spr);
+        }
+        else if (s_shot_bank[i].painted)
+            shot_vram_point(s->spr, s_shot_bank[i].index);
+        else
+            shot_vram_keep_banked(s->spr);
         return;
     }
     for (i = 0; i < SHOT_BANK_N; i++)
@@ -970,7 +1047,8 @@ static void shot_vram_remember(Slot *s, u8 want, u8 ntiles)
         s_shot_bank[i].frame = s->frame;
         s_shot_bank[i].nib = want;
         s_shot_bank[i].ntiles = ntiles;
-        s_shot_bank[i].index = (u16)(s->spr->attribut & TILE_INDEX_MASK);
+        s_shot_bank[i].painted = painted;
+        s_shot_bank[i].index = cur;
         shot_vram_keep_banked(s->spr);
         return;
     }
@@ -983,13 +1061,14 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
 
     if (!s->spr || !shot_art_shareable(s))
         return 0;
-    /* #142 tagged (FRAME_LEAD, 15) without painting. Share only a
-     * bank remember()'d after a real paint_all-15 DMA. Lookup miss
-     * still returns 0 so the first disc paints. 3+ white bolinhas
-     * then retarget that bank instead of a 128 B DMA each. */
+    /* #142 tagged (FRAME_LEAD, 15) without painting. #145 shared any
+     * remembered 15, including verbatim packed nibble 4. Share only a
+     * bank remember()'d after paint_all-15, and only if this sprite
+     * can sit on that index. Lookup miss still paints. */
     if (ebullet_normal_lock(s))
     {
-        if (shot_bank_lookup(s->frame, want, &idx))
+        if (want == 15 && shot_bank_lookup(s->frame, want, &idx)
+            && shot_bank_painted_at(s->frame, 15, idx))
         {
             shot_vram_point(s->spr, idx);
             s->vram_fr = s->frame;
@@ -1000,6 +1079,9 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
     }
     if (shot_bank_lookup(s->frame, want, &idx))
     {
+        /* HIGH / type 21 nibble 4 must not retarget onto a white bank. */
+        if (want != 15 && shot_bank_painted_at(s->frame, 15, idx))
+            return 0;
         shot_vram_point(s->spr, idx);
         s->vram_fr = s->frame;
         s->vram_nib = want;
@@ -1617,6 +1699,7 @@ static void orb_cache_reset(void)
 
 static u16 s_remap_cache[REMAP_CACHE_N][REMAP_TILE_BYTES / 2];
 static u16 s_remap_key[REMAP_CACHE_N];
+static u8  s_remap_paint[REMAP_CACHE_N]; /* 1 = paint_all; 0 = from→to */
 static u8  s_remap_used;
 static u8  s_remap_next;
 
@@ -1633,8 +1716,10 @@ static const u8 *remap_cache_get(u8 frame, u8 baked, u8 want,
     u8 i;
     u8 *dst;
 
+    /* paint_all is not in `key`. A remap-from-15 no-op leaves packed
+     * nibble 4 in the slot; a later paint_all-15 must not reuse it. */
     for (i = 0; i < s_remap_used; i++)
-        if (s_remap_key[i] == key)
+        if (s_remap_key[i] == key && s_remap_paint[i] == paint_all)
             return (const u8 *)s_remap_cache[i];
 
     if (s_remap_used < REMAP_CACHE_N)
@@ -1652,6 +1737,7 @@ static const u8 *remap_cache_get(u8 frame, u8 baked, u8 want,
     else
         remap_tiles(dst, src, nbytes, baked, want);
     s_remap_key[i] = key;
+    s_remap_paint[i] = paint_all;
     return dst;
 }
 
@@ -1771,10 +1857,18 @@ static void spr_upload_color(Slot *s)
 
     /* Same frame + same nibble: vis/XOR-high-nibble blinks must not DMA.
      * #144 refused this skip under NORMAL so every white bolinha
-     * paint_all-15'd 128 B/tick (3+ volley slowdown). Poison was
-     * AUTO_TILE_UPLOAD / NEED_TILES_UPLOAD overwriting the bank;
-     * shot_vram_own on place + spr_sync_proj already closes that.
-     * Skip DMA when the tag is honest. */
+     * paint_all-15'd 128 B/tick (3+ volley slowdown). #145 restored
+     * the skip but shared any (frame,15) tag — packed nibble 4 plus
+     * type 21's PAL2[4] walk is the colour-cycle regression.
+     * Bust a lying tag so we fall through; skip only when the sprite
+     * sits on a paint_all-15 bank. */
+    if (ebullet_normal_lock(s)
+        && s->vram_fr == s->frame && s->vram_nib == want
+        && !shot_vram_white_proven(s, want))
+    {
+        s->vram_fr = 0xFF;
+        s->vram_nib = 0xFF;
+    }
     if (s->vram_fr == s->frame && s->vram_nib == want)
         return;
     /* Same art, only sat_col nibble changed. Defer when the queue is
@@ -1789,6 +1883,11 @@ static void spr_upload_color(Slot *s)
     if (ebullet_cram_shot(s))
         (void)shot_vram_prepare(s, want, (u8)ts->numTile);
     else if (shot_vram_prepare(s, want, (u8)ts->numTile))
+    {
+        shot_vram_own(sp);
+        return;
+    }
+    if (!shot_vram_leave_white(sp, s->frame, want))
         return;
 
     nbytes = (u16)(ts->numTile * 32);
@@ -1807,6 +1906,7 @@ static void spr_upload_color(Slot *s)
          * (leads share PAL2[4] and cycle on NORMAL). paint_all onto 15
          * isolates the white lock; onto 4 enables the walk. */
         u8 paint_bar = (u8)(ebullet_bolinha(s) || ebullet_normal_lock(s));
+        u8 painted = (u8)(disc || paint_bar);
 
         /* Verbatim tiles: queue ROM/FAR src. Skip the 128-byte copy
          * into a DMA scratch (and do not allocateAndQueue an unused buf). */
@@ -1815,7 +1915,7 @@ static void spr_upload_color(Slot *s)
             DMA_queueDma(DMA_VRAM, (void *)src, vaddr, (u16)(nbytes / 2), 2);
             s->vram_fr = s->frame;
             s->vram_nib = want;
-            shot_vram_remember(s, want, (u8)ts->numTile);
+            shot_vram_remember(s, want, (u8)ts->numTile, 0);
             shot_vram_own(sp);
             return;
         }
@@ -1825,7 +1925,7 @@ static void spr_upload_color(Slot *s)
          * variant cache; a warm (frame,nibble) slot is a plain queue. */
         {
             const u8 *cached = remap_cache_get(s->frame, baked, want, src,
-                                               nbytes, (u8)(disc || paint_bar));
+                                               nbytes, painted);
             u16 nq = nbytes;
 
             if (nq > REMAP_TILE_BYTES)
@@ -1844,7 +1944,7 @@ static void spr_upload_color(Slot *s)
         }
         s->vram_fr = s->frame;
         s->vram_nib = want;
-        shot_vram_remember(s, want, (u8)ts->numTile);
+        shot_vram_remember(s, want, (u8)ts->numTile, painted);
         shot_vram_own(sp);
     }
 }
@@ -7213,7 +7313,7 @@ static void fire7_paint_cram_tiles(Slot *f)
         orb_paint_body_nibbles(buf, src, nbytes, want);
     f->vram_fr = f->frame;
     f->vram_nib = want;
-    shot_vram_remember(f, want, ts->numTile ? (u8)ts->numTile : 4);
+    shot_vram_remember(f, want, ts->numTile ? (u8)ts->numTile : 4, 1);
 }
 
 static void fire7_bind_cram(Slot *f)
@@ -7386,6 +7486,8 @@ static void xor_cram_paint(Slot *s, u8 nib)
      * leftover slot alone so we do not overwrite a NORMAL white bar. */
     if (shot_vram_prepare(s, nib, (u8)ts->numTile) && s->vram_nib != nib)
         return;
+    if (!shot_vram_leave_white(sp, s->frame, nib))
+        return;
     vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);
     src = (const u8 *)FAR_SAFE(ts->tiles, nbytes);
     /* paint_all: packed/baked mismatch (4 vs 15) would leave white
@@ -7396,7 +7498,7 @@ static void xor_cram_paint(Slot *s, u8 nib)
     DMA_queueDma(DMA_VRAM, (void *)cached, vaddr, (u16)(nbytes / 2), 2);
     s->vram_fr = s->frame;
     s->vram_nib = nib;
-    shot_vram_remember(s, nib, (u8)ts->numTile);
+    shot_vram_remember(s, nib, (u8)ts->numTile, 1);
     shot_vram_own(sp);
 }
 

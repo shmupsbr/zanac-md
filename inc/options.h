@@ -81,8 +81,11 @@
  * type-73..79 FRAME_LEAD / type-45 fire. Type 21 FRAME_LIGHT_BAR
  * (`<===>`) is Japan 8659 always — it does not enter this switch.
  * SGDK-packed FRAME_LEAD nibble 4 must not sit on PAL2[4] when
- * NORMAL. #144 own-after-place / reuse lock stays; do not DMA
- * paint_all-15 every tick (that is the 3+ white-bolinha slowdown).
+ * NORMAL (type 21's always-on 8659 walks that CRAM slot). Share a
+ * (FRAME_LEAD,15) bank only after paint_all rewrote every body
+ * nibble to 15; never skip while the bank still holds packed 4.
+ * #144 own-after-place / reuse lock stays; do not DMA paint_all-15
+ * every tick (that is the 3+ white-bolinha slowdown).
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1

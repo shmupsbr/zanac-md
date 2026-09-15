@@ -179,7 +179,9 @@ def main() -> int:
         return fail("matching (frame,nibble) skip missing")
     if "ebullet_normal_lock" in skip.group(0):
         return fail("do not paint_all every tick under NORMAL (3+ volley slowdown)")
-    print("  spr_upload_color: matching skip; reuse own holds white")
+    if "shot_vram_white_proven" not in up:
+        return fail("box×3 skip must sit on paint_all-15, not packed nibble 4")
+    print("  spr_upload_color: matching skip; proven white bank holds")
 
     sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""
     if "ebullet_normal_lock" not in sync or "shot_vram_own" not in sync:

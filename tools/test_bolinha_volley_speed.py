@@ -102,7 +102,9 @@ def main() -> int:
         return fail("matching-vram skip missing (3+ discs would DMA every tick)")
     if "ebullet_normal_lock" in skip.group(0):
         return fail("#144 per-tick paint_all under NORMAL is the 3+ slowdown")
-    print("  spr_upload_color: skip DMA when (frame,15) already painted")
+    if "shot_vram_white_proven" not in up:
+        return fail("do not skip DMA on a lying (frame,15) tag")
+    print("  spr_upload_color: skip DMA when (frame,15) already paint_all'd")
 
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
     lock = prep.split("ebullet_normal_lock")[1][:500] if "ebullet_normal_lock" in prep else ""
@@ -110,6 +112,8 @@ def main() -> int:
         return fail("NORMAL 3+ discs must share a remembered (FRAME_LEAD,15) bank")
     if "return 0" not in lock:
         return fail("first disc must still paint_all-15 (lookup miss)")
+    if "painted" not in lock and "shot_bank_painted_at" not in lock:
+        return fail("share only a paint_all-15 bank (verbatim nibble 4 must not skip)")
     print("  shot_vram_prepare: share after first paint_all-15")
 
     sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""

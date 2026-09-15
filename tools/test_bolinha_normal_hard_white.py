@@ -105,7 +105,9 @@ def main() -> int:
     arm = prep.split("ebullet_normal_lock")[1][:500] if "ebullet_normal_lock" in prep else ""
     if "shot_bank_lookup" not in arm or "return 0" not in arm:
         return fail("shot_vram_prepare NORMAL arm must lookup then return 0 on miss")
-    print("  shot_vram_prepare: share remembered 15; miss still paint_all")
+    if "shot_bank_painted_at" not in arm and "painted" not in arm:
+        return fail("NORMAL share must require a paint_all-15 bank, not any (frame,15) tag")
+    print("  shot_vram_prepare: share remembered paint_all-15; miss still paint_all")
 
     place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
     if re.search(
@@ -143,7 +145,9 @@ def main() -> int:
         return fail("spr_upload_color matching-vram skip missing")
     if "ebullet_normal_lock" in skip.group(0):
         return fail("NORMAL must not DMA paint_all every tick (3+ volley slowdown)")
-    print("  spr_upload_color: matching skip; own-after-place holds white")
+    if "shot_vram_white_proven" not in up:
+        return fail("NORMAL matching skip must bust a tag that is not paint_all-15")
+    print("  spr_upload_color: matching skip; skip only a proven white bank")
 
     sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""
     if "ebullet_normal_lock" not in sync or "shot_vram_own" not in sync:
