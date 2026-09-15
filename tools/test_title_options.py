@@ -126,7 +126,13 @@ def main() -> int:
         print("  title: START-held debug warps kept")
 
     opt_ui = fn_span(title, "static void draw_options_menu(void)") or ""
-    for s in ('"REDEFINE KEYS"', '"SKILL LEVEL"', '"AUTOFIRE"', '"PLAYER SHIPS"'):
+    for s in (
+        '"REDEFINE KEYS"',
+        '"SKILL LEVEL"',
+        '"AUTOFIRE"',
+        '"PLAYER SHIPS"',
+        '"PLAYER EXTEND"',
+    ):
         if s not in opt_ui:
             fail(f"OPTIONS must list {s}")
             fails += 1
@@ -136,8 +142,22 @@ def main() -> int:
     if '"X2"' not in opt_ui or '"X5"' not in opt_ui:
         fail("Autofire must list X2..X5")
         fails += 1
+    if '"EVERY 20000"' not in opt_ui:
+        fail("PLAYER EXTEND must list EVERY 20000 (X=20000 placar)")
+        fails += 1
+    if '"NONE +500000"' not in opt_ui and '"NO EXTENDS"' not in opt_ui:
+        fail("PLAYER EXTEND must list NO EXTENDS / NONE +500000")
+        fails += 1
     else:
         print("  title: OPTIONS rows + values")
+
+    upd_opt = fn_span(title, "static void update_options(u16 pressed)") or ""
+    if "options_nudge_extend" not in upd_opt:
+        fail("OPTIONS Left/Right must nudge PLAYER EXTEND")
+        fails += 1
+    if "#define OPT_ROWS            5" not in title:
+        fail("OPT_ROWS must be 5 (extend row added)")
+        fails += 1
 
     keys_ui = fn_span(title, "static void draw_keys_menu(void)") or ""
     if '"BOTH"' not in keys_ui or '"PRIMARY"' not in keys_ui or '"SECONDARY"' not in keys_ui:
@@ -298,8 +318,11 @@ def main() -> int:
     if "s_autofire = AUTOFIRE_NORMAL" not in opt_c:
         fail("default autofire must be Normal")
         fails += 1
+    if "s_extend = EXTEND_EVERY_X" not in opt_c:
+        fail("default PLAYER EXTEND must be EVERY X (stock)")
+        fails += 1
     else:
-        print("  defaults: Normal skill / Normal autofire / 3 ships")
+        print("  defaults: Normal skill / Normal autofire / 3 ships / EVERY X")
 
     if fails:
         print(f"{fails} FAIL(s)", file=sys.stderr)

@@ -26,8 +26,9 @@
  *
  * After settle: GAME START / OPTIONS (PAL3 highlight / PAL2 dim).
  * GAME START then the version pick: PLEASE SELECT: / MSX ENHANCED /
- * ZANAC MD. OPTIONS is a second screen (keys / skill / autofire / ships)
- * in the lower title area under the MD mark, same charset helpers.
+ * ZANAC MD. OPTIONS is a second screen (keys / skill / autofire / ships
+ * / player extend) in the lower title area under the MD mark, same
+ * charset helpers.
  */
 
 #define TITLE_TILE_BASE     (TILE_USER_INDEX + 32)
@@ -49,7 +50,7 @@
 #define ROW_PICK0           (TITLE_NT0 + 22)
 #define OPT_LAB_COL         3
 #define OPT_VAL_COL         20
-#define OPT_ROWS            4
+#define OPT_ROWS            5
 
 static u8 s_phase;
 static u8 s_sel;            /* 0 Original, 1 Zanac MD */
@@ -475,9 +476,23 @@ static void draw_options_menu(void)
 {
     static const char *k_skill[3] = { "EASY", "NORMAL", "HARD" };
     static const char *k_auto[5] = { "NORMAL", "X2", "X3", "X4", "X5" };
+    /* X = 20000 on the placar (E112=0x20 → 2000 + HUD trailing 0). */
+    static const char *k_extend[10] = {
+        "EVERY 20000",
+        "EVERY 40000",
+        "EVERY 60000",
+        "20000 ONCE",
+        "20000 TWICE",
+        "40000 ONCE",
+        "40000 TWICE",
+        "60000 ONCE",
+        "60000 TWICE",
+        "NONE +500000"
+    };
     char ships[2];
     u8 sk = options_skill();
     u8 af = options_autofire();
+    u8 ex = options_extend();
 
     ships[0] = (char)('0' + options_player_ships());
     ships[1] = 0;
@@ -485,6 +500,8 @@ static void draw_options_menu(void)
         sk = SKILL_NORMAL;
     if (af > AUTOFIRE_X5)
         af = AUTOFIRE_NORMAL;
+    if (ex > EXTEND_NONE)
+        ex = EXTEND_EVERY_X;
 
     paint_black((u16)ROW_CRED0, (u16)(28 - ROW_CRED0));
     fill_letterbox();
@@ -492,7 +509,8 @@ static void draw_options_menu(void)
     draw_opt_row(1, "SKILL LEVEL", k_skill[sk], s_sel == 1);
     draw_opt_row(2, "AUTOFIRE", k_auto[af], s_sel == 2);
     draw_opt_row(3, "PLAYER SHIPS", ships, s_sel == 3);
-    draw_str_pal("B BACK", OPT_LAB_COL, (u16)(ROW_CRED0 + 5), PAL2);
+    draw_opt_row(4, "PLAYER EXTEND", k_extend[ex], s_sel == 4);
+    draw_str_pal("B BACK", OPT_LAB_COL, (u16)(ROW_CRED0 + 6), PAL2);
 }
 
 static void draw_keys_menu(void)
@@ -647,6 +665,8 @@ static void update_options(u16 pressed)
             options_nudge_autofire(dir);
         else if (s_sel == 3)
             options_nudge_ships(dir);
+        else if (s_sel == 4)
+            options_nudge_extend(dir);
         draw_options_menu();
     }
     if (fire_edge(pressed))

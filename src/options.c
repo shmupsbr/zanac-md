@@ -6,10 +6,25 @@
 static u8 s_skill = SKILL_NORMAL;
 static u8 s_autofire = AUTOFIRE_NORMAL;
 static u8 s_ships = PLAYER_LIVES_INIT;
+static u8 s_extend = EXTEND_EVERY_X;
 static u8 s_bind[3] = {
     FIRE_ROLE_BOTH,
     FIRE_ROLE_PRIMARY,
     FIRE_ROLE_SECONDARY
+};
+
+/* Filipe: fewer/harder extends => higher score bonus. */
+static const u8 k_extend_bonus[10] = {
+    0,   /* EVERY X, stock */
+    20,  /* EVERY two-X */
+    30,  /* EVERY three-X */
+    60,  /* X once (harder than twice) */
+    50,  /* X twice */
+    80,  /* two-X once */
+    70,  /* two-X twice */
+    100, /* three-X once */
+    90,  /* three-X twice */
+    100  /* none; plus EXTEND_NONE_START at player_init */
 };
 
 static const u16 k_pad[3] = { BUTTON_A, BUTTON_B, BUTTON_C };
@@ -51,6 +66,13 @@ u8 options_player_ships(void)
     return s_ships;
 }
 
+u8 options_extend(void)
+{
+    if (s_extend > EXTEND_MODE_MAX)
+        return EXTEND_EVERY_X;
+    return s_extend;
+}
+
 u8 options_bind(u8 btn)
 {
     if (btn > OPTIONS_BTN_C)
@@ -71,6 +93,11 @@ void options_nudge_autofire(s8 dir)
 void options_nudge_ships(s8 dir)
 {
     s_ships = wrap_u8((s16)s_ships + dir, OPTIONS_SHIPS_MIN, OPTIONS_SHIPS_MAX);
+}
+
+void options_nudge_extend(s8 dir)
+{
+    s_extend = wrap_u8((s16)s_extend + dir, EXTEND_EVERY_X, EXTEND_NONE);
 }
 
 void options_cycle_bind(u8 btn, s8 dir)
@@ -145,6 +172,75 @@ u8 options_scale_time(u8 e155)
             bin = 1;
     }
     return bin_to_bcd(bin);
+}
+
+u32 options_scale_clear_bonus(u32 pts)
+{
+    /* 0x9302 / 0x91C1 boss-base clear only. Easy half, Hard double. */
+    if (s_skill == SKILL_EASY)
+        return pts / 2UL;
+    if (s_skill == SKILL_HARD)
+        return pts * 2UL;
+    return pts;
+}
+
+u8 options_extend_bonus_pct(void)
+{
+    u8 mode = options_extend();
+
+    return k_extend_bonus[mode];
+}
+
+u32 options_apply_score_bonus(u32 pts)
+{
+    u8 pct = options_extend_bonus_pct();
+
+    if (!pct)
+        return pts;
+    return pts + (pts * (u32)pct) / 100UL;
+}
+
+u8 options_extend_uses_stock_bump(void)
+{
+    u8 mode = options_extend();
+
+    return (u8)(mode == EXTEND_EVERY_X
+        || mode == EXTEND_EVERY_2X
+        || mode == EXTEND_EVERY_3X);
+}
+
+u32 options_extend_threshold(u32 stock_thresh, u8 grants)
+{
+    u8 mode = options_extend();
+    u32 x = EXTEND_X_POINTS;
+    u32 span;
+
+    switch (mode)
+    {
+    case EXTEND_EVERY_X:
+        return stock_thresh;
+    case EXTEND_EVERY_2X:
+        return stock_thresh * 2UL;
+    case EXTEND_EVERY_3X:
+        return stock_thresh * 3UL;
+    case EXTEND_X_ONCE:
+        return (grants >= 1) ? 0UL : x;
+    case EXTEND_X_TWICE:
+        return (grants >= 2) ? 0UL : (x * (u32)(grants + 1));
+    case EXTEND_2X_ONCE:
+        return (grants >= 1) ? 0UL : (x * 2UL);
+    case EXTEND_2X_TWICE:
+        span = x * 2UL;
+        return (grants >= 2) ? 0UL : (span * (u32)(grants + 1));
+    case EXTEND_3X_ONCE:
+        return (grants >= 1) ? 0UL : (x * 3UL);
+    case EXTEND_3X_TWICE:
+        span = x * 3UL;
+        return (grants >= 2) ? 0UL : (span * (u32)(grants + 1));
+    case EXTEND_NONE:
+    default:
+        return 0UL;
+    }
 }
 
 static u16 mask_roles(u8 a, u8 b)

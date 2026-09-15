@@ -186,8 +186,8 @@ def main() -> int:
         fails += 1
     else:
         print("  map_script_base_cleared: bonus_draw")
-    if cleared and "player_add_score" not in cleared:
-        fail("KEEP: still player_add_score from 0x9302")
+    if cleared and "player_add_clear_bonus" not in cleared and "player_add_score" not in cleared:
+        fail("KEEP: still add the 0x9302 award")
         fails += 1
     else:
         print("  KEEP: 0x9302 award still added")
