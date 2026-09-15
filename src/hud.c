@@ -233,9 +233,9 @@ static void hud_load_logo(void)
 }
 
 /* Static 6x2 miniature (good #121 Zanac + MD bands). FIRE 18-19,
- * blank 20, logo 21-22, blank 23, TIME 24, gray hbar 25. Cols 25-30
- * keep the 0x4BDF 03 sides. TIME no longer overlaps; its clear
- * restamps that border row, not this mark. */
+ * logo 20-21, TIME 22, gray hbar 23. X=0 both sides (see hud.h).
+ * Cols 25-30 keep the 0x4BDF 03 sides. TIME clear restamps only
+ * its own border row, not this mark. */
 static void hud_draw_logo(void)
 {
     u16 y0 = hud_y(HUD_LOGO_MSX_ROW);
@@ -274,8 +274,9 @@ static void hud_draw_static_labels(void)
     hud_hbar(3);
     hud_hbar(6);
     hud_hbar(9);
-    /* 0x4BDF loop still covers 10-23 (B=0x0E). TIME + closing bar
-     * sit in the bottom letterbox HUD corner so the 6x2 fits. */
+    /* 0x4BDF loop covers 10-23 (B=0x0E). Closing hbar overwrites 23
+     * (playfield end, screen 25). TIME is reserved on 22 — restamp
+     * 0x4BDF so the row stays a border until hud_draw_time turns on. */
     hud_border_row(HUD_TIME_MSX_ROW);
     hud_hbar(HUD_CLOSE_HBAR_ROW);
     hud_draw_logo();
@@ -352,7 +353,7 @@ void hud_draw_time(u8 on, u8 e155)
     {
         if (s_time_lbl)
         {
-            /* TIME is MSX 24; 6x2 logo sits at 21-22. Restore 0x4BDF
+            /* TIME is MSX 22; 6x2 logo sits at 20-21. Restore 0x4BDF
              * on TIME's row only. Do not space-fill (shared 0x20) and
              * do not restamp the logo. */
             hud_border_row(HUD_TIME_MSX_ROW);

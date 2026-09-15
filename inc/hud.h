@@ -12,12 +12,22 @@
  */
 #define HUD_TILE_BASE   (TILE_USER_INDEX + 32)
 
-/* Dashboard column below FIRE. FIRE stays 18-19; one blank; 6x2 logo;
- * one blank; TIME; closing gray hbar. TIME uses the bottom letterbox
- * HUD corner (screen 26) so the 6x2 is equidistant between FIRE and
- * TIME. TIME is 1 row above the hbar (≤2). */
-#define HUD_TIME_MSX_ROW     24
-#define HUD_CLOSE_HBAR_ROW   25
+/*
+ * Bottom column is playfield-tall (MSX 0-23 / screen 2-25). Do not put
+ * TIME or the gray closing hbar in the letterbox (MSX 24-25 / screen
+ * 26-27) — that was #123 and left a missing piece at the playfield base.
+ *
+ * FIRE 18-19 + 6x2 logo + TIME + two equal gaps + hbar 23:
+ *   2 + 2 + 1 + 2X rows must fit in MSX 18-22. Only X=0 fits.
+ * X=1 needs FIRE on 16-17, which is the ROUND digit (do not collide
+ * ROUND / LEVEL / ZANAC). Moving FIRE to 17-18 still yields X=0 (TIME
+ * would land on the hbar). Chosen X=0, FIRE left at 18-19:
+ *   FIRE 18-19, logo 20-21, TIME 22, gray hbar 23 (screen 25, y_off=16).
+ * Rows are disjoint; TIME clear restamps only its own 0x4BDF row.
+ */
+#define HUD_FIRE_MSX_ROW     18
+#define HUD_TIME_MSX_ROW     22
+#define HUD_CLOSE_HBAR_ROW   23
 
 void hud_init(void);
 void hud_draw_alc(void);

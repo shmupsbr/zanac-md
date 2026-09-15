@@ -383,10 +383,81 @@ def main() -> int:
     else:
         print("  type 44 44BA: collide_player does not skip KIND_GROUND")
 
+    # --- Playfield-tall dashboard: hbar MSX 23, TIME ≤22, equal gaps ---
+    hud_h = (ROOT / "inc" / "hud.h").read_text(encoding="utf-8")
+    logo_h = (ROOT / "inc" / "hud_logo.h").read_text(encoding="utf-8")
+
+    def _cpp_int(src: str, name: str) -> int | None:
+        m = re.search(rf"#define\s+{name}\s+(\d+)", src)
+        return int(m.group(1)) if m else None
+
+    fire_row = _cpp_int(hud_h, "HUD_FIRE_MSX_ROW")
+    time_row = _cpp_int(hud_h, "HUD_TIME_MSX_ROW")
+    close_row = _cpp_int(hud_h, "HUD_CLOSE_HBAR_ROW")
+    logo_row = _cpp_int(logo_h, "HUD_LOGO_MSX_ROW")
+    logo_hgt = _cpp_int(logo_h, "HUD_LOGO_TILE_H")
+    if fire_row != 18:
+        fail("FIRE block stays MSX 18-19 (0x3A59)")
+        fails += 1
+    if close_row != 23:
+        fail("HUD_CLOSE_HBAR_ROW must be MSX 23 (flush with playfield)")
+        fails += 1
+    else:
+        print("  hbar at MSX 23 (playfield end / screen 25)")
+    if time_row is None or time_row > 22:
+        fail("HUD_TIME_MSX_ROW must be ≤22 (not letterbox MSX 24-25)")
+        fails += 1
+    else:
+        print(f"  TIME at MSX {time_row} (≤22)")
+    if None in (logo_row, logo_hgt, time_row, close_row, fire_row):
+        fail("dashboard row constants missing")
+        fails += 1
+    else:
+        fire_last = fire_row + 1
+        logo_last = logo_row + logo_hgt - 1
+        fire_rows = set(range(fire_row, fire_last + 1))
+        logo_rows = set(range(logo_row, logo_last + 1))
+        if logo_hgt != 2:
+            fail("logo must stay 6x2 (not the broken 6x1)")
+            fails += 1
+        if logo_rows & fire_rows or time_row in logo_rows or close_row in logo_rows:
+            fail("6x2 logo must not overlap FIRE / TIME / hbar")
+            fails += 1
+        elif time_row in fire_rows or time_row == close_row:
+            fail("TIME must not overlap FIRE or the closing hbar")
+            fails += 1
+        else:
+            print(f"  logo MSX {logo_row}-{logo_last} disjoint from FIRE/TIME/hbar")
+        gap_above = logo_row - fire_last - 1
+        gap_below = time_row - logo_last - 1
+        if gap_above < 0 or gap_below < 0 or gap_above != gap_below:
+            fail(f"equal gaps around logo, got above={gap_above} below={gap_below}")
+            fails += 1
+        else:
+            print(f"  equal gap X={gap_above} above and below the 6x2")
+
+    if "VDP_fillTileMapRect(BG_A, attr, 0, 26, MODE_H32_COLS, 2)" not in mode:
+        fail("letterbox BG_A rows 26-27 must be full-width letter tiles (incl. HUD)")
+        fails += 1
+    else:
+        print("  letterbox BG_A 26-27 full H32 width")
+    if "VDP_fillTileMapRect(WINDOW, attr, MODE_BAR_COL, 26, MODE_BAR_W, 2)" not in mode:
+        fail("letterbox must restamp WINDOW HUD cols 24-31 on screen 26-27")
+        fails += 1
+    else:
+        print("  letterbox WINDOW HUD cols 26-27 opaque (no TIME/hbar carve-out)")
+    if time_row is not None and time_row >= 24:
+        fail("TIME must not live in letterbox MSX 24-25 / screen 26-27")
+        fails += 1
+    if close_row is not None and close_row >= 24:
+        fail("closing hbar must not live in letterbox MSX 24-25 / screen 26-27")
+        fails += 1
+
     if fails:
         print(f"{fails} HUD dashboard restore check(s) failed", file=sys.stderr)
         return 1
-    print("ok: 4BDF 8-tile + CT bg=0; wrap DMA pads+restores HUD; spr hide")
+    print("ok: 4BDF 8-tile + CT bg=0; wrap DMA pads+restores HUD; spr hide; "
+          "playfield-tall dash")
     return 0
 
 
