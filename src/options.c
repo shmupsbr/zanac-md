@@ -24,7 +24,7 @@ static const u8 k_extend_bonus[10] = {
     70,  /* two-X twice */
     100, /* three-X once */
     90,  /* three-X twice */
-    100  /* none; plus EXTEND_NONE_START at player_init */
+    100  /* none; plus 50000 internal (500000 HUD) at player_init */
 };
 
 static const u16 k_pad[3] = { BUTTON_A, BUTTON_B, BUTTON_C };

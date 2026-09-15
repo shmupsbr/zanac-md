@@ -45,14 +45,18 @@
  * (when / how often lives are granted). The % is a score bonus on
  * every placar add — compensation for a harder extend schedule, not
  * a substitute for the life rules. ONCE > TWICE at each tier.
- * NO EXTENDS is +100% plus EXTEND_NONE_START at player_init.
+ * NO EXTENDS is +100% plus EXTEND_NONE_START at player_init
+ * (50000 internal → 500000 on the HUD trailing-0 placar).
  * Default EVERY X = stock lives + 0%.
  */
 #define EXTEND_X_POINTS         2000UL
 #define EXTEND_X_DISPLAY        20000UL
 /* NO EXTENDS: +100% on every placar add, plus this flat grant at
- * player_init / game start (not doubled by the %). */
-#define EXTEND_NONE_START       500000UL
+ * player_init / game start (not doubled by the %). Same units as
+ * EXTEND_X_POINTS / extra_life_check: HUD 0x49B5 appends a trailing
+ * 0, so 50000 internal reads as 500000 on the placar. */
+#define EXTEND_NONE_START         50000UL
+#define EXTEND_NONE_START_DISPLAY 500000UL
 
 #define EXTEND_EVERY_X          0
 #define EXTEND_EVERY_2X         1

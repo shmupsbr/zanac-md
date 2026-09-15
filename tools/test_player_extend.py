@@ -13,6 +13,10 @@ so extends fire on the inflated total. Default EVERY X = stock lives + 0%.
 
 Filipe bonuses: 2X TWICE = 60%, X TWICE = 50%.
 
+NO EXTENDS also grants a flat 500000 on the visible placar at
+player_init (50000 internal; same ×10 as X). The +100% must not
+run on that grant.
+
 Usage (from zanac-md):
     python tools/test_player_extend.py
 """
@@ -327,16 +331,22 @@ def main() -> int:
         fail("NO EXTENDS must grant EXTEND_NONE_START at player_init")
         fails += 1
     if re.search(r"options_apply_score_bonus\s*\(", init):
-        fail("the 500000 start grant must stay flat (not +100% again)")
+        fail("the 500000 displayed start grant must stay flat (not +100% again)")
+        fails += 1
+    if "EXTEND_NONE_START_DISPLAY" in init:
+        fail("player_init must add EXTEND_NONE_START (internal), not DISPLAY")
         fails += 1
     else:
-        print("  player_init: E112=0x20, grants=0, NO EXTENDS flat 500000")
+        print("  player_init: E112=0x20, grants=0, NO EXTENDS flat 50000 internal")
 
-    if "#define EXTEND_NONE_START       500000UL" not in opt_h:
-        fail("EXTEND_NONE_START must be 500000")
+    if "#define EXTEND_NONE_START         50000UL" not in opt_h:
+        fail("EXTEND_NONE_START must be 50000 internal (500000 on HUD)")
+        fails += 1
+    if "#define EXTEND_NONE_START_DISPLAY 500000UL" not in opt_h:
+        fail("EXTEND_NONE_START_DISPLAY must be 500000 (visible placar)")
         fails += 1
     else:
-        print("  EXTEND_NONE_START = 500000 (flat, at game start)")
+        print("  EXTEND_NONE_START = 50000 internal / 500000 placar")
 
     if "options_nudge_extend" not in title:
         fail("title OPTIONS must Left/Right PLAYER EXTEND")

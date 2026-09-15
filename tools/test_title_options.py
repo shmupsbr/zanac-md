@@ -145,6 +145,7 @@ def main() -> int:
     if '"EVERY 20000"' not in opt_ui:
         fail("PLAYER EXTEND must list EVERY 20000 (X=20000 placar)")
         fails += 1
+    # +500000 is the visible HUD grant (50000 internal × trailing 0).
     if '"NONE +500000"' not in opt_ui and '"NO EXTENDS"' not in opt_ui:
         fail("PLAYER EXTEND must list NO EXTENDS / NONE +500000")
         fails += 1

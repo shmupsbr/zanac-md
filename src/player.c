@@ -281,8 +281,9 @@ void player_init(void)
     s_e114 = 0;
     s_e148 = 0;
     s_e14f = 0;
-    /* NO EXTENDS: flat 500000 on the placar at game start. Do not
-     * apply the +100% again (that would turn it into 1M). Life
+    /* NO EXTENDS: flat 500000 on the placar at game start
+     * (EXTEND_NONE_START = 50000 internal; hud_score6 trailing 0).
+     * Do not apply the +100% again (that would show 1000000). Life
      * grants stay off in this mode. */
     if (options_extend() == EXTEND_NONE)
     {
