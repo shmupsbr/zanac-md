@@ -71,9 +71,11 @@
 #define EXTEND_MODE_MAX         EXTEND_NONE
 
 /*
- * BULLET VISIBILITY. Default NORMAL = Japan white bolinha (FRAME_LEAD
- * types 20/37/38/41/42/43, sat_col 0x8F / baked nibble 15). HIGH
- * restores the #136 PAL2[4] 8659 colour-walk on those discs only.
+ * BULLET VISIBILITY. Independent of SKILL LEVEL / ALC: Easy, Normal,
+ * and Hard must not gate or override white vs colour-cycle.
+ * Default NORMAL = Japan white bolinha (FRAME_LEAD types
+ * 20/37/38/41/42/43, sat_col 0x8F / baked nibble 15). HIGH restores
+ * the #136 PAL2[4] 8659 colour-walk on those discs only.
  * Type 21 FRAME_LIGHT_BAR still cycles in both modes.
  */
 #define BULLET_VIS_NORMAL       0
