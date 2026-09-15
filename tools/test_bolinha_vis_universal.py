@@ -198,22 +198,33 @@ def main() -> int:
         return fail("init-RET visit must apply_vis (no white orphan frame)")
     print("  init-RET: apply_vis")
 
+    lock = fn_span(ent, "static int ebullet_normal_lock(const Slot *s)")
+    if not lock:
+        return fail("ebullet_normal_lock must be the single NORMAL white choke")
+    if "ebullet_bolinha" not in lock or "options_bullet_high" not in lock:
+        return fail("ebullet_normal_lock is bolinha && !HIGH")
+    if mentions_skill(lock):
+        return fail("ebullet_normal_lock must not consult skill/ALC")
+    print("  ebullet_normal_lock: bolinha && !HIGH")
+
     setc = fn_span(ent, "static void spr_set_sat_col(Slot *s, u8 col)")
     if not setc:
         return fail("spr_set_sat_col missing")
-    if "ebullet_bolinha" not in setc or "options_bullet_high" not in setc:
+    if "ebullet_normal_lock" not in setc:
         return fail("spr_set_sat_col must gate NORMAL bolinha every colour tick")
     if mentions_skill(setc):
         return fail("spr_set_sat_col must not consult skill/ALC")
     gate = setc.split("xor_cram_cycle")[0]
     if "xor_cram_release" not in gate or "0x8F" not in gate:
         return fail("NORMAL bolinha must xor_cram_release and force 0x8F before any CRAM walk")
+    if "vram_fr = 0xFF" not in gate:
+        return fail("NORMAL lock must invalidate leftover vram so packed nibble 4 cannot skip paint_all")
     print("  spr_set_sat_col: NORMAL skips CRAM/8659 every tick")
 
     nibfn = fn_span(ent, "static u8 sat_col_tile_nibble(const Slot *s, u8 want)")
     if not nibfn:
         return fail("sat_col_tile_nibble missing")
-    if "ebullet_bolinha" not in nibfn or "options_bullet_high" not in nibfn:
+    if "ebullet_normal_lock" not in nibfn:
         return fail("sat_col_tile_nibble must force NORMAL bolinha nibble 15")
     if mentions_skill(nibfn):
         return fail("sat_col_tile_nibble must not consult skill/ALC")
@@ -222,6 +233,35 @@ def main() -> int:
     if white_at < 0 or cram_at < 0 or white_at > cram_at:
         return fail("NORMAL bolinha nibble 15 must win over leftover cram_nib")
     print("  sat_col_tile_nibble: NORMAL 15 beats leftover PAL2[4]")
+
+    prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)")
+    if not prep or "ebullet_normal_lock" not in prep:
+        return fail("shot_vram_prepare must refuse the (FRAME_LEAD,15) skip under NORMAL")
+    if "return 0" not in prep.split("ebullet_normal_lock")[1][:80]:
+        return fail("NORMAL lock must return 0 from shot_vram_prepare (always paint_all)")
+    print("  shot_vram_prepare: NORMAL never skips paint_all")
+
+    place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
+    if "else\n                spr_upload_color(s)" in place or (
+        "if (share)" in place and "s->vram_nib = want" in place.split("if (share)")[1][:400]
+    ):
+        return fail("spr_place must not tag vram_nib on share skip (packed nibble 4 poison)")
+    if "spr_upload_color(s)" not in place:
+        return fail("spr_place must always spr_upload_color after addSprite")
+    if "SPR_FLAG_AUTO_TILE_UPLOAD" not in place:
+        return fail("spr_place must drop AUTO_TILE_UPLOAD (SGDK updateFrame loadTiles)")
+    print("  spr_place: always paint_all; no share-tag skip")
+
+    wanted = fn_span(ent, "static int xor_cram_wanted(const Slot *s)") or ""
+    bind = fn_span(ent, "static int xor_cram_bind(Slot *s, u8 col)") or ""
+    cyc = fn_span(ent, "static void xor_cram_cycle(Slot *s, u8 col)") or ""
+    if "ebullet_normal_lock" not in wanted:
+        return fail("xor_cram_wanted must refuse NORMAL bolinhas")
+    if "ebullet_normal_lock" not in bind:
+        return fail("xor_cram_bind must refuse NORMAL bolinhas")
+    if "ebullet_normal_lock" not in cyc:
+        return fail("xor_cram_cycle must refuse NORMAL bolinhas (no PAL2[4] walk)")
+    print("  xor_cram: wanted/bind/cycle hard-refuse NORMAL bolinhas")
 
     if not re.search(
         r"#define\s+SPR_FLAG_NEED_TILES_UPLOAD\s+0x0004", ent
@@ -321,6 +361,7 @@ def main() -> int:
         "static int ebullet_lead_disc(const Slot *s)",
         "static int ebullet_bolinha(const Slot *s)",
         "static int ebullet_bolinha_high(const Slot *s)",
+        "static int ebullet_normal_lock(const Slot *s)",
         "static int ebullet_cram_shot(const Slot *s)",
         "static void ebullet_apply_vis(Slot *e)",
         "static void spr_set_sat_col(Slot *s, u8 col)",

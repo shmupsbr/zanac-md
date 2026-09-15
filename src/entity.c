@@ -815,6 +815,16 @@ static int ebullet_bolinha_high(const Slot *s)
     return ebullet_bolinha(s) && options_bullet_high();
 }
 
+/* NORMAL vis: Japan white lock. zanac.asm +04=0x8F at 84eb (37/42),
+ * 8513 (38/43/45 via 850b), 8539 (41), 8672 (20). Type 21 init 863b
+ * writes no +04; active 8659 is HIGH-only. Named so every colour
+ * choke (spr_set_sat_col / xor_cram / tile bank) can hard-refuse a
+ * walk without duplicating the vis test. */
+static int ebullet_normal_lock(const Slot *s)
+{
+    return ebullet_bolinha(s) && !options_bullet_high();
+}
+
 /* HIGH vis: PAL2[4] 8659 walk. NORMAL: not a CRAM shot (white lock). */
 static int ebullet_cram_shot(const Slot *s)
 {
@@ -967,6 +977,13 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
     u16 idx;
 
     if (!s->spr || !shot_art_shareable(s))
+        return 0;
+    /* #140/#142: (FRAME_LEAD, 15) bank skip left packed nibble 4 in
+     * VRAM. XOR walkers cycle PAL2[2]; leftover 8659 cycles PAL2[4].
+     * Box×3 / k_gun 38 / boss-2 type 42 all share that bank, so
+     * NORMAL still colour-walked while type 21 (own LIGHT_BAR bank)
+     * looked white. Always paint_all onto 15 under the lock. */
+    if (ebullet_normal_lock(s))
         return 0;
     if (shot_bank_lookup(s->frame, want, &idx))
     {
@@ -1765,7 +1782,7 @@ static void spr_upload_color(Slot *s)
          * while 8659 cycles the unused PAL2[4] (type 21) or packed 4
          * (leads share PAL2[4] and cycle on NORMAL). paint_all onto 15
          * isolates the white lock; onto 4 enables the walk. */
-        u8 paint_bar = (u8)ebullet_bolinha(s);
+        u8 paint_bar = (u8)(ebullet_bolinha(s) || ebullet_normal_lock(s));
 
         /* Verbatim tiles: queue ROM/FAR src. Skip the 128-byte copy
          * into a DMA scratch (and do not allocateAndQueue an unused buf). */
@@ -1821,16 +1838,26 @@ static void spr_frame_cb(Sprite *sp)
 
 static void spr_set_sat_col(Slot *s, u8 col)
 {
-    /* Every colour tick: NORMAL bolinha never CRAM-walks. Leftover
-     * cram_nib (HIGH bind, slot reuse) would cycle PAL2[4] and
-     * sat_col_tile_nibble would keep tiles on 4. */
-    if (ebullet_bolinha(s) && !options_bullet_high())
+    /* Single colour choke. NORMAL bolinha: Japan 0x8F, never CRAM,
+     * never 8659. Leftover cram_nib (HIGH bind / slot reuse) would
+     * cycle PAL2[4] and a (frame,15) bank skip would keep packed
+     * nibble 4 in VRAM — that is why #142 still colour-walked boxes,
+     * ground guns, and boss 2 (type 42 FRAME_LEAD) while boss 1
+     * type 21 (LIGHT_BAR bank) looked white. */
+    if (ebullet_normal_lock(s))
     {
-        if (s->cram_nib)
+        u8 had_cram = s->cram_nib;
+
+        if (had_cram)
             xor_cram_release(s);
+        if (s->sat_col != 0x8F || s->vram_nib != 15 || had_cram)
+            s->vram_fr = 0xFF;
         s->sat_col = 0x8F;
         if (s->spr && s->spr->frame)
+        {
             spr_upload_color(s);
+            shot_vram_own(s->spr);
+        }
         return;
     }
     /* Japan +04 XOR / 72de is one SAT-colour write. After a CRAM bind
@@ -1904,16 +1931,18 @@ static void spr_place(Slot *s, u16 frame)
             SPR_setVisibility(s->spr, HIDDEN);
             SPR_setPriority(s->spr, FALSE);
             SPR_setAnimAndFrame(s->spr, 0, frame);
+            /* Markers / risers already drop AUTO_TILE_UPLOAD. Ebullets
+             * must too: updateFrame ORs NEED_TILES_UPLOAD after the
+             * frame callback if that flag is on, and packed FRAME_LEAD
+             * nibble 4 overwrites paint_all-15. */
+            s->spr->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
+            shot_vram_own(s->spr);
             if (share)
-            {
-                /* Same addSprite flags as flyers. SPR_setVRAMTileIndex
-                 * drops the unused AUTO slot and sits on the bank. */
                 shot_vram_point(s->spr, bank_idx);
-                s->vram_fr = (u8)frame;
-                s->vram_nib = want;
-            }
-            else
-                spr_upload_color(s);
+            /* Never tag vram_fr/vram_nib here. A share hit used to skip
+             * spr_upload_color, leaving packed nibble 4 keyed as 15. */
+            spr_upload_color(s);
+            shot_vram_own(s->spr);
             sat_bind_depth(s->spr, sat_depth_primary(s));
             if (shot_art_shareable(s))
                 spr_sync_proj(s);
@@ -1927,7 +1956,8 @@ static void spr_place(Slot *s, u16 frame)
         /* Disc SAT must re-paint every place: SGDK can pack baked 15
          * off 15 so a cached nibble leaves flyer-blue junk in the disc. */
         if (s->kind == KIND_ORB || s->kind == KIND_EXPL
-            || s->kind == KIND_PDEAD || s->kind == KIND_HUSK)
+            || s->kind == KIND_PDEAD || s->kind == KIND_HUSK
+            || (ebullet_normal_lock(s) && s->vram_nib != 15))
         {
             s->vram_fr = 0xFF;
             s->vram_nib = 0xFF;
@@ -2849,6 +2879,7 @@ static void spawn_ebullet_dir(s16 x, s16 y, u8 dir)
     Slot *e = free_enemy();
     if (!e)
         return;
+    xor_cram_release(e);
     e->kind = KIND_EBULLET;
     e->variant = 37;  /* MSX type37 lead; dir is aim only (was mis-typed as type) */
     e->hp = 1;
@@ -2856,6 +2887,8 @@ static void spawn_ebullet_dir(s16 x, s16 y, u8 dir)
     e->script = 0;
     e->cram_nib = 0;
     e->cram_col = 0;
+    e->vram_fr = 0xFF;
+    e->vram_nib = 0xFF;
     e->x = x;
     e->y = y;
     apply_dir(e, dir);
@@ -3678,6 +3711,7 @@ static void spawn_lead20(s16 x, s16 y)
 
     if (!c)
         return;
+    xor_cram_release(c);
     c->kind = KIND_EBULLET;
     c->variant = 20;
     c->hp = 1;
@@ -3690,6 +3724,8 @@ static void spawn_lead20(s16 x, s16 y)
     c->alive = 1;
     c->cram_nib = 0;
     c->cram_col = 0;
+    c->vram_fr = 0xFF;
+    c->vram_nib = 0xFF;
     ebullet_apply_vis(c);        /* vis owns +04; Japan 8672 is 0x8F */
     spr_place(c, FRAME_LEAD);
     ebullet_apply_vis(c);
@@ -4154,6 +4190,10 @@ static void apply_dir_88_xor(Slot *e, u8 dir)
 
 static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
 {
+    /* Release leftover CRAM before KIND_EBULLET: a reused FLASH/SIG
+     * slot with cram_nib=2/4 would otherwise zero the field and leak
+     * a walking PAL2 index onto the new bolinha. */
+    xor_cram_release(e);
     e->kind = KIND_EBULLET;
     e->variant = variant;
     e->hp = 1;
@@ -4163,6 +4203,8 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     e->dest = 0;
     e->cram_nib = 0;
     e->cram_col = 0;
+    e->vram_fr = 0xFF;
+    e->vram_nib = 0xFF;
     e->x = x;
     e->y = y;
     apply_dir(e, dir);
@@ -5540,6 +5582,7 @@ static int spawn_from_type(u8 t)
         u8 r2 = rnd();
         u8 x = (u8)((r1 & 0x7f) + (r2 & 0x1f) + 0x28);
 
+        xor_cram_release(e);
         e->kind = KIND_EBULLET;
         e->variant = 20;
         e->hp = 1;
@@ -5550,6 +5593,8 @@ static int spawn_from_type(u8 t)
         e->alive = 1;
         e->cram_nib = 0;
         e->cram_col = 0;
+        e->vram_fr = 0xFF;
+        e->vram_nib = 0xFF;
         ebullet_apply_vis(e);        /* vis owns +04; Japan 8672 is 0x8F */
         spr_place(e, FRAME_LEAD);
         ebullet_apply_vis(e);
@@ -7220,7 +7265,7 @@ static u8 xor_cram_alloc(const Slot *s)
 static u8 sat_col_tile_nibble(const Slot *s, u8 want)
 {
     /* NORMAL bolinha: never sit on leftover CRAM (PAL2[4] 8659). */
-    if (ebullet_bolinha(s) && !options_bullet_high())
+    if (ebullet_normal_lock(s))
         return 15;
     if (s->cram_nib)
         return s->cram_nib;
@@ -7247,6 +7292,8 @@ static int xor_cram_wanted(const Slot *s)
      * a bolinha: HIGH vis CRAM-binds like type 21; NORMAL stays white.
      * Solid dual-SAT flyers (luster 16-18, stealth 34/65/66, sart 61)
      * keep one TMS nibble. Binding them made PAL2[5/6] walk. */
+    if (ebullet_normal_lock(s))
+        return 0;
     if (s->kind == KIND_LUSTER || s->kind == KIND_STEALTH
         || s->kind == KIND_DESCEND || s->kind == KIND_UMBER
         || s->kind == KIND_DUSTER || s->kind == KIND_TERUZO)
@@ -7305,6 +7352,8 @@ static int xor_cram_bind(Slot *s, u8 col)
 {
     u8 nib;
 
+    if (ebullet_normal_lock(s))
+        return 0;
     if (!xor_cram_wanted(s))
         return 0;
     /* Type 21 8659 must CRAM even while the hardware sprite is
@@ -7341,6 +7390,11 @@ static int xor_cram_bind(Slot *s, u8 col)
 
 static void xor_cram_cycle(Slot *s, u8 col)
 {
+    /* HARD: NORMAL bolinha never writes CRAM. A leftover cram_nib on a
+     * reused slot would walk PAL2[4] and every FRAME_LEAD disc sitting
+     * on packed nibble 4 would colour-cycle (boxes / ground / boss 2). */
+    if (ebullet_normal_lock(s))
+        return;
     s->cram_col = col;
     s->sat_col = col;
     PAL_setColor((u16)((PAL2 * 16) + s->cram_nib),

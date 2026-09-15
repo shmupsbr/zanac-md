@@ -79,7 +79,9 @@
  * Scope: FRAME_LEAD 20/37/38/41/42/43, FRAME_LIGHT_BAR 21, type 45
  * bar/med, k_gun 48/49/52-55, box-4 3x38 volleys, edge spawners,
  * type-73..79 base_fire. SGDK-packed FRAME_LEAD nibble 4 must not
- * sit on PAL2[4] when NORMAL.
+ * sit on PAL2[4] when NORMAL. #142 still missed the (FRAME_LEAD,15)
+ * VRAM-bank skip: boxes / ground guns / boss 2 type 42 shared packed
+ * nibble 4 and colour-cycled; boss 1 type 21 had its own bank.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1
