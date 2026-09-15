@@ -44,15 +44,19 @@ Output: `out/rom.bin`.
 
 | Screen | Input | Action |
 |--------|--------|--------|
-| Title  | D-Pad up/down | Select Original / Zanac MD |
-| Title  | START | Start game in that mode (round 1) |
-| Title  | C + START | Continue from last round reached |
+| Title  | D-Pad up/down | Select GAME START / OPTIONS, then MSX ENHANCED / ZANAC MD |
+| Title  | A / C / START | Confirm / enter |
+| Title  | B | Back (mode pick and OPTIONS) |
+| Title  | C + START | On mode pick: continue from last round reached |
+| OPTIONS | Left / Right | Change skill, autofire, ships, or key roles |
 | Game   | D-Pad | Fly the ship (8-dir) |
-| Game   | A | Primary shot (20-frame period) + secondary fire-weapon (type 3). Spends fire ammo. |
-| Game   | B | Primary shot only. Does **not** spawn type 3 or spend fire ammo. |
-| Game   | C | Secondary fire-weapon only (the depleting special). Spends fire ammo. Fire 2 Field stays auto. |
+| Game   | A | Default: primary shot (20-frame period) + secondary fire-weapon (type 3). Spends fire ammo. |
+| Game   | B | Default: primary shot only. Does **not** spawn type 3 or spend fire ammo. |
+| Game   | C | Default: secondary fire-weapon only (the depleting special). Spends fire ammo. Fire 2 Field stays auto. |
 | Game   | START | Pause toggle (MSX STOP). Mutes via E200; PAUSE at nametable 0x396A |
 | Game over | A / B / C / START | Skip wait, return to title |
+
+Title OPTIONS (session RAM, no SRAM): **Skill** Easy / Normal / Hard (default Normal), **Autofire** Normal / x2 / x3 / x4 / x5 (default Normal = 20-frame period), **Player Ships** 1–5 (default 3), **Redefine Keys** assigns A/B/C among both / primary only / secondary only without duplicates. Easy caps effective ALC at `0x50` (50% of the `0xA0` rank clamp) and multiplies boss TIME by 1.5; Hard seeds E12E to `0x50` on ALC reset (rank can then rise or ease) and halves boss TIME.
 
 On start the map-script interpreter runs the **real round-1** stream
 (`0xA751`, 57 commands). Cmd 8 at row 30 draws `ROUND 1` from E701. Cmd 9
@@ -75,7 +79,8 @@ respawn; last life → GAME OVER → title. Type 83 (if spawned) is a touch pick
 ```
 src/main.c              ROM entry, TITLE <-> GAME
 src/game.c              state machine, start/update, game-over
-src/title.c             title screen
+src/title.c             title screen (GAME START / OPTIONS + mode pick)
+src/options.c           session skill / autofire / ships / A-B-C remap
 src/mode.c              MODE_ORIGINAL / MODE_ZANAC_MD + ModeAssets
 src/player.c            16x16 MSX ship, 8-dir, lives/i-frames/death
 src/entity.c            shots + fire-weapon + airborne + boxes/chips/sig + ground 44/70/71/72/82 + type 83

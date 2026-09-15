@@ -23,6 +23,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLY = ROOT / "src" / "player.c"
+OPT = ROOT / "src" / "options.c"
 GAME = ROOT / "src" / "game.c"
 MAPC = ROOT / "src" / "map_script.c"
 README = ROOT / "README.md"
@@ -51,6 +52,7 @@ def fn_span(src: str, sig: str) -> str | None:
 def main() -> int:
     fails = 0
     ply = PLY.read_text(encoding="utf-8")
+    opt = OPT.read_text(encoding="utf-8")
     game = GAME.read_text(encoding="utf-8")
     mapc = MAPC.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
@@ -61,15 +63,24 @@ def main() -> int:
         fails += 1
         upd = ply
 
-    # Primary: A or B.
-    if not re.search(
-        r"if \(joy & \(BUTTON_A \| BUTTON_B\)\)",
-        upd,
+    # Default remap: A both, B primary, C secondary → primary A|B, secondary A|C.
+    if "FIRE_ROLE_BOTH" not in opt or "FIRE_ROLE_PRIMARY" not in opt:
+        fail("options.c must keep the A/B/C role table")
+        fails += 1
+    elif not re.search(
+        r"s_bind\[3\]\s*=\s*\{\s*FIRE_ROLE_BOTH\s*,\s*FIRE_ROLE_PRIMARY\s*,\s*FIRE_ROLE_SECONDARY",
+        opt,
     ):
-        fail("primary shot must be A|B")
+        fail("default remap must be A=BOTH B=PRIMARY C=SECONDARY")
         fails += 1
     else:
-        print("  player_update: primary shot on A|B")
+        print("  options: default A both / B primary / C secondary")
+
+    if "options_primary_buttons()" not in upd:
+        fail("primary shot must go through the remap table")
+        fails += 1
+    else:
+        print("  player_update: primary via options_primary_buttons")
 
     if "entity_spawn_shot" not in upd or "entity_on_shot_fired" not in upd:
         fail("KEEP: primary still ALC + spawn_shot")
@@ -77,24 +88,11 @@ def main() -> int:
     else:
         print("  KEEP: ALC + spawn_shot on primary")
 
-    # Secondary: A or C, or fire 2 auto. B must not be in this mask.
-    sec = re.search(
-        r"if \(\(joy & \(([^)]+)\)\) \|\| s_fire_num == 2\)",
-        upd,
-    )
-    if not sec:
-        fail("secondary spawn gate not found")
+    if "options_secondary_buttons()" not in upd or "s_fire_num == 2" not in upd:
+        fail("secondary spawn gate must use remap + fire 2 auto")
         fails += 1
     else:
-        mask = sec.group(1)
-        if "BUTTON_A" not in mask or "BUTTON_C" not in mask:
-            fail("secondary must be A|C")
-            fails += 1
-        elif "BUTTON_B" in mask:
-            fail("B must not spawn the fire-weapon")
-            fails += 1
-        else:
-            print("  player_update: secondary on A|C; B excluded")
+        print("  player_update: secondary via options_secondary_buttons")
 
     if "entity_try_spawn_fire" not in upd:
         fail("KEEP: entity_try_spawn_fire still the type-3 spawn")

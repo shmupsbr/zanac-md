@@ -7,6 +7,7 @@
 #include "resources.h"
 #include "player.h"
 #include "mode.h"
+#include "options.h"
 
 /*
  * Original boot is MSX title_intro_seq 0x5A11:
@@ -23,8 +24,10 @@
  * The MD mark is drawn once at rest and never moves. Color 0 on both planes
  * is transparent, so the blue settles behind the mark.
  *
- * Mode pick stays small: PLEASE SELECT: / MSX ENHANCED / ZANAC MD.
- * Highlight is PAL3 vs dim PAL2. Do not open an SGDK START/OPTIONS menu.
+ * After settle: GAME START / OPTIONS (PAL3 highlight / PAL2 dim).
+ * GAME START then the version pick: PLEASE SELECT: / MSX ENHANCED /
+ * ZANAC MD. OPTIONS is a second screen (keys / skill / autofire / ships)
+ * in the lower title area under the MD mark, same charset helpers.
  */
 
 #define TITLE_TILE_BASE     (TILE_USER_INDEX + 32)
@@ -37,7 +40,16 @@
 
 #define PHASE_PREWAIT       0
 #define PHASE_SWIRL         1
-#define PHASE_WAIT          2
+#define PHASE_MAIN          2   /* GAME START / OPTIONS */
+#define PHASE_MODE          3   /* PLEASE SELECT: / MSX ENHANCED / ZANAC MD */
+#define PHASE_OPTIONS       4
+#define PHASE_KEYS          5
+
+#define ROW_CRED0           (TITLE_NT0 + 15)
+#define ROW_PICK0           (TITLE_NT0 + 22)
+#define OPT_LAB_COL         3
+#define OPT_VAL_COL         20
+#define OPT_ROWS            4
 
 static u8 s_phase;
 static u8 s_sel;            /* 0 Original, 1 Zanac MD */
@@ -99,6 +111,7 @@ static u8 charset_tile(char c)
     if (t >= 'a' && t <= 'z')
         t = (u8)(t - 'a' + 'A');
     if (t == ' ' || t == '.' || t == '@'
+        || t == ':'
         || (t >= '0' && t <= '9') || (t >= 'A' && t <= 'Z'))
         return t;
     return ' ';
@@ -424,6 +437,92 @@ static void swirl_settle(void)
         draw_zanac_bar(i, col, row, 1);
 }
 
+static void paint_black(u16 y, u16 n)
+{
+    u16 attr = TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, BG_TILE);
+
+    if (!n || y >= 28)
+        return;
+    if ((u16)(y + n) > 28)
+        n = (u16)(28 - y);
+    VDP_fillTileMapRect(BG_A, attr, 0, y, TITLE_COLS, n);
+}
+
+static void draw_opt_row(u8 row, const char *lab, const char *val, int on)
+{
+    u16 y = (u16)(ROW_CRED0 + row);
+    u16 pal = on ? PAL3 : PAL2;
+
+    paint_black(y, 1);
+    draw_str_pal(lab, OPT_LAB_COL, y, pal);
+    if (val)
+        draw_str_pal(val, OPT_VAL_COL, y, pal);
+}
+
+static void draw_main_menu(void)
+{
+    /* Two choices under the credits / AII marks. NT0+22 is the old
+     * mode-pick row — below the MD mark (rows 10-14) on H32. */
+    paint_black((u16)ROW_PICK0, 3);
+    fill_letterbox();
+    draw_str_cx_pal("GAME START", (u16)(TITLE_NT0 + 22),
+                    (s_sel == 0) ? PAL3 : PAL2);
+    draw_str_cx_pal("OPTIONS", (u16)(TITLE_NT0 + 23),
+                    (s_sel == 0) ? PAL2 : PAL3);
+}
+
+static void draw_options_menu(void)
+{
+    static const char *k_skill[3] = { "EASY", "NORMAL", "HARD" };
+    static const char *k_auto[5] = { "NORMAL", "X2", "X3", "X4", "X5" };
+    char ships[2];
+    u8 sk = options_skill();
+    u8 af = options_autofire();
+
+    ships[0] = (char)('0' + options_player_ships());
+    ships[1] = 0;
+    if (sk > SKILL_HARD)
+        sk = SKILL_NORMAL;
+    if (af > AUTOFIRE_X5)
+        af = AUTOFIRE_NORMAL;
+
+    paint_black((u16)ROW_CRED0, (u16)(28 - ROW_CRED0));
+    fill_letterbox();
+    draw_opt_row(0, "REDEFINE KEYS", 0, s_sel == 0);
+    draw_opt_row(1, "SKILL LEVEL", k_skill[sk], s_sel == 1);
+    draw_opt_row(2, "AUTOFIRE", k_auto[af], s_sel == 2);
+    draw_opt_row(3, "PLAYER SHIPS", ships, s_sel == 3);
+    draw_str_pal("B BACK", OPT_LAB_COL, (u16)(ROW_CRED0 + 5), PAL2);
+}
+
+static void draw_keys_menu(void)
+{
+    static const char *k_btn[3] = { "A", "B", "C" };
+    static const char *k_role[3] = { "BOTH", "PRIMARY", "SECONDARY" };
+    u8 i;
+    u8 role;
+
+    paint_black((u16)ROW_CRED0, (u16)(28 - ROW_CRED0));
+    fill_letterbox();
+    for (i = 0; i < 3; i++)
+    {
+        role = options_bind(i);
+        if (role > FIRE_ROLE_SECONDARY)
+            role = FIRE_ROLE_BOTH;
+        draw_opt_row(i, k_btn[i], k_role[role], s_sel == i);
+    }
+    draw_str_pal("B BACK", OPT_LAB_COL, (u16)(ROW_CRED0 + 4), PAL2);
+}
+
+static void show_main(void)
+{
+    s_phase = PHASE_MAIN;
+    paint_black((u16)ROW_CRED0, (u16)(28 - ROW_CRED0));
+    fill_letterbox();
+    draw_title_text();
+    draw_main_menu();
+}
+
 static void draw_mode_hint(void)
 {
     /* Small, not a full menu. Default MSX ENHANCED (MODE_ORIGINAL);
@@ -437,11 +536,9 @@ static void draw_mode_hint(void)
 
 static void enter_wait(void)
 {
-    s_phase = PHASE_WAIT;
     s_sel = 0;
     swirl_settle();
-    draw_title_text();
-    draw_mode_hint();
+    show_main();
 }
 
 static void confirm_start(void)
@@ -458,6 +555,140 @@ static void confirm_start(void)
         game_start_round(mode, 8);
     else
         game_start(mode);
+}
+
+static void enter_mode(void)
+{
+    s_phase = PHASE_MODE;
+    s_sel = 0;
+    paint_black((u16)ROW_PICK0, 3);
+    fill_letterbox();
+    draw_mode_hint();
+}
+
+static void enter_options(void)
+{
+    s_phase = PHASE_OPTIONS;
+    s_sel = 0;
+    draw_options_menu();
+}
+
+static void enter_keys(void)
+{
+    s_phase = PHASE_KEYS;
+    s_sel = 0;
+    draw_keys_menu();
+}
+
+static void update_main(u16 joy, u16 pressed)
+{
+    if (pressed & (BUTTON_UP | BUTTON_DOWN))
+    {
+        s_sel ^= 1;
+        draw_main_menu();
+    }
+    if (fire_edge(pressed))
+    {
+        if (joy & BUTTON_DOWN)
+            s_sel = 1;
+        if (s_sel == 0)
+            enter_mode();
+        else
+            enter_options();
+    }
+}
+
+static void update_mode(u16 joy, u16 pressed)
+{
+    if (pressed & BUTTON_B)
+    {
+        s_sel = 0;
+        show_main();
+        return;
+    }
+    if (pressed & (BUTTON_UP | BUTTON_DOWN))
+    {
+        s_sel ^= 1;
+        draw_mode_hint();
+    }
+    if (fire_edge(pressed))
+    {
+        if (joy & BUTTON_DOWN)
+            s_sel = 1;
+        confirm_start();
+    }
+}
+
+static void update_options(u16 pressed)
+{
+    if (pressed & BUTTON_B)
+    {
+        s_sel = 1;
+        show_main();
+        return;
+    }
+    if (pressed & BUTTON_UP)
+    {
+        s_sel = (u8)((s_sel + OPT_ROWS - 1) % OPT_ROWS);
+        draw_options_menu();
+    }
+    else if (pressed & BUTTON_DOWN)
+    {
+        s_sel = (u8)((s_sel + 1) % OPT_ROWS);
+        draw_options_menu();
+    }
+    if (pressed & (BUTTON_LEFT | BUTTON_RIGHT))
+    {
+        s8 dir = (pressed & BUTTON_LEFT) ? -1 : 1;
+
+        if (s_sel == 1)
+            options_nudge_skill(dir);
+        else if (s_sel == 2)
+            options_nudge_autofire(dir);
+        else if (s_sel == 3)
+            options_nudge_ships(dir);
+        draw_options_menu();
+    }
+    if (fire_edge(pressed))
+    {
+        if (s_sel == 0)
+            enter_keys();
+        else
+        {
+            s_sel = 1;
+            show_main();
+        }
+    }
+}
+
+static void update_keys(u16 pressed)
+{
+    if (pressed & BUTTON_B)
+    {
+        s_sel = 0;
+        enter_options();
+        return;
+    }
+    if (pressed & BUTTON_UP)
+    {
+        s_sel = (u8)((s_sel + 2) % 3);
+        draw_keys_menu();
+    }
+    else if (pressed & BUTTON_DOWN)
+    {
+        s_sel = (u8)((s_sel + 1) % 3);
+        draw_keys_menu();
+    }
+    if (pressed & (BUTTON_LEFT | BUTTON_RIGHT))
+    {
+        options_cycle_bind(s_sel, (pressed & BUTTON_LEFT) ? -1 : 1);
+        draw_keys_menu();
+    }
+    if (fire_edge(pressed))
+    {
+        s_sel = 0;
+        enter_options();
+    }
 }
 
 void title_enter(void)
@@ -547,18 +778,14 @@ void title_update(void)
         return;
     }
 
-    if (pressed & (BUTTON_UP | BUTTON_DOWN))
-    {
-        s_sel ^= 1;
-        draw_mode_hint();
-    }
-
-    if (fire_edge(pressed))
-    {
-        if (joy & BUTTON_DOWN)
-            s_sel = 1;
-        confirm_start();
-    }
+    if (s_phase == PHASE_MAIN)
+        update_main(joy, pressed);
+    else if (s_phase == PHASE_MODE)
+        update_mode(joy, pressed);
+    else if (s_phase == PHASE_OPTIONS)
+        update_options(pressed);
+    else if (s_phase == PHASE_KEYS)
+        update_keys(pressed);
 
     s_prev = joy;
 }
