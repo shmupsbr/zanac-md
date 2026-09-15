@@ -155,7 +155,9 @@ def main() -> int:
     want = fn_span(ent, "static u8 proj_tile_want(const Slot *s)")
     if not want or "LIGHTBAR_CRAM_NIB" not in want or "variant == 21" not in want:
         return fail("proj_tile_want must key type 21 on LIGHTBAR_CRAM_NIB (not leftover 0x8F)")
-    print("  proj_tile_want: type 21 always nibble 4")
+    if "ebullet_lead_disc" not in want:
+        return fail("proj_tile_want must key lead discs on LIGHTBAR_CRAM_NIB (not baked 15)")
+    print("  proj_tile_want: type 21 + lead discs always nibble 4")
 
     point = fn_span(ent, "static void shot_vram_point(Sprite *sp, u16 idx)")
     if not point:
