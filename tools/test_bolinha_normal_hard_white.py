@@ -115,9 +115,37 @@ def main() -> int:
         return fail("spr_place share path must not tag vram_nib (that skipped paint_all)")
     if place.count("spr_upload_color(s)") < 2:
         return fail("spr_place must upload on both new-sprite and reuse arms")
-    if "SPR_FLAG_AUTO_TILE_UPLOAD" not in place:
-        return fail("spr_place must clear AUTO_TILE_UPLOAD so loadTiles cannot overwrite 15")
-    print("  spr_place: paint_all on spawn; AUTO_TILE_UPLOAD off")
+    if place.count("SPR_FLAG_AUTO_TILE_UPLOAD") < 2:
+        return fail("spr_place must drop AUTO_TILE_UPLOAD on new-sprite AND reuse arms")
+    reuse = ""
+    if "if (!s->spr)" in place:
+        reuse = place.split("if (!s->spr)", 1)[1]
+        if "\n    else\n    {" in reuse:
+            reuse = reuse.split("\n    else\n    {", 1)[1]
+    if "SPR_FLAG_AUTO_TILE_UPLOAD" not in reuse:
+        return fail("spr_place reuse arm must drop AUTO_TILE_UPLOAD (box×3 crate leftover)")
+    if reuse.find("shot_vram_own") < 0 or reuse.find("SPR_setAnimAndFrame") < 0:
+        return fail("spr_place reuse arm must own tiles after setAnimAndFrame")
+    if reuse.find("shot_vram_own") < reuse.find("SPR_setAnimAndFrame"):
+        return fail("spr_place reuse own-after must follow setAnimAndFrame (#143 new-sprite lock)")
+    if reuse.count("shot_vram_own") < 2:
+        return fail("spr_place reuse arm must own after setAnimAndFrame and after upload")
+    print("  spr_place: paint_all on spawn; AUTO_TILE_UPLOAD off on new AND reuse")
+
+    up = fn_span(ent, "static void spr_upload_color(Slot *s)") or ""
+    skip = re.search(
+        r"if\s*\(\s*s->vram_fr\s*==\s*s->frame\s*&&\s*s->vram_nib\s*==\s*want"
+        r"[\s\S]{0,80}?\)\s*return;",
+        up,
+    )
+    if not skip or "ebullet_normal_lock" not in skip.group(0):
+        return fail("spr_upload_color matching-vram skip must refuse NORMAL lock (poisoned 15 tag)")
+    print("  spr_upload_color: NORMAL never skips paint_all on a (frame,15) tag")
+
+    sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""
+    if "ebullet_normal_lock" not in sync or "shot_vram_own" not in sync:
+        return fail("spr_sync_proj must own tiles every visible NORMAL tick")
+    print("  spr_sync_proj: NORMAL own before SPR_update")
 
     initf = fn_span(
         ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)"
@@ -126,11 +154,14 @@ def main() -> int:
         return fail("init_frag must xor_cram_release leftover CRAM")
     kind_at = initf.find("e->kind = KIND_EBULLET")
     rel_at = initf.find("xor_cram_release")
+    own_at = initf.find("shot_vram_own")
     if kind_at < 0 or rel_at < 0 or rel_at > kind_at:
         return fail("init_frag must xor_cram_release leftover before KIND_EBULLET")
+    if own_at < 0 or own_at > kind_at:
+        return fail("init_frag must shot_vram_own leftover crate/flyer SAT before KIND_EBULLET")
     if "vram_fr = 0xFF" not in initf:
         return fail("init_frag must bust leftover vram tags (slot reuse)")
-    print("  init_frag: release CRAM + invalidate vram (boxes / boss 2 / guns)")
+    print("  init_frag: release CRAM + own leftover SAT + invalidate vram")
 
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
     if drop.count("spawn_frag") < 3 or ", 38)" not in drop:
@@ -146,7 +177,18 @@ def main() -> int:
         return fail("boss 2 / type 75 must still spawn type 42 (8d6c)")
     if "spr_set_sat_col" in fire:
         return fail("base_fire must not colour-walk children")
-    print("  bosses: type 73→21 (white bar) and type 75→42 (white disc) via init_frag")
+    for n in (73, 74, 75, 76, 77, 78, 79):
+        if ("e->variant == %d" % n) not in fire:
+            return fail("base_fire must handle boss type %d" % n)
+    if "spawn_frag(x, y, c, 43)" not in fire:
+        return fail("boss 74/76/77 must still spawn type 43")
+    if ", 45)" not in fire:
+        return fail("boss 79 must still spawn type 45")
+    if "spawn_frag(x, y, dir, 38)" not in fire:
+        return fail("base_fire fallback must still type 38")
+    if "base_muzzle" not in fire:
+        return fail("do not break eye muzzle")
+    print("  bosses 73-79: 21/38/42/43/45 via init_frag; muzzle kept")
 
     gun = fn_span(ent, "static void spawn_child_dir(s16 x, s16 y, u8 stype, u8 dir)") or ""
     if "spawn_frag(x, y, dir, 21)" not in gun or "spawn_frag(x, y, dir, 38)" not in gun:
@@ -167,20 +209,21 @@ def main() -> int:
 
     asm = load_asm()
     if not asm:
-        return fail("zanac.asm required (cite Japan 0x8F on spawn)")
-    for addr, who in (
-        ("0x84eb", "type 37/42"),
-        ("0x8513", "type 38/43/45"),
-        ("0x8539", "type 41"),
-        ("0x8672", "type 20"),
-    ):
-        if not re.search(rf"LD\s+\(IX\+0x04\),\s*0x8f\s*;\s*{addr}", asm, re.I):
-            return fail("zanac.asm %s is not LD (IX+04), 0x8F (%s)" % (addr, who))
-    if not re.search(r"LD\s+A,\s*R\s*;\s*0x8659", asm, re.I):
-        return fail("zanac.asm 8659 is not LD A,R (type 21 HIGH-only)")
-    if not re.search(r"JR\s+NZ,\s*0x8659\s*;\s*0x8639", asm, re.I):
-        return fail("zanac.asm 8639 is not JR NZ 8659")
-    print("  zanac.asm: 84eb/8513/8539/8672 +04=0x8F; 8659 type 21 only")
+        print("  (zanac.asm not on this machine; C locks only)")
+    else:
+        for addr, who in (
+            ("0x84eb", "type 37/42"),
+            ("0x8513", "type 38/43/45"),
+            ("0x8539", "type 41"),
+            ("0x8672", "type 20"),
+        ):
+            if not re.search(rf"LD\s+\(IX\+0x04\),\s*0x8f\s*;\s*{addr}", asm, re.I):
+                return fail("zanac.asm %s is not LD (IX+04), 0x8F (%s)" % (addr, who))
+        if not re.search(r"LD\s+A,\s*R\s*;\s*0x8659", asm, re.I):
+            return fail("zanac.asm 8659 is not LD A,R (type 21 HIGH-only)")
+        if not re.search(r"JR\s+NZ,\s*0x8659\s*;\s*0x8639", asm, re.I):
+            return fail("zanac.asm 8639 is not JR NZ 8659")
+        print("  zanac.asm: 84eb/8513/8539/8672 +04=0x8F; 8659 type 21 only")
     print("ok: NORMAL hard-white FRAME_LEAD (boxes/ground/boss2) + type 21; HIGH walks")
     return 0
 

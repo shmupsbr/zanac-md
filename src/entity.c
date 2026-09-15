@@ -1115,6 +1115,12 @@ static void spr_sync_proj(Slot *s)
     }
     SPR_setPosition(sp, dx, dy);
     spr_vis_playfield(sp, dx, dy, 1);
+    /* NORMAL: own every visible tick so SPR_update cannot loadTiles
+     * packed FRAME_LEAD nibble 4 over paint_all-15. Box×3 spawn during
+     * collide (after update_enemies); this is the last chance before
+     * the hardware upload. HIGH still wants AUTO on nibble 4. */
+    if (ebullet_normal_lock(s))
+        shot_vram_own(sp);
 }
 
 /* MSX spawn_col_marker (0x71da): type 0x27 slot, +04=0x81, HL left at +03.
@@ -1750,8 +1756,15 @@ static void spr_upload_color(Slot *s)
     if (orb_upload_japan(s, want))
         return;
 
-    /* Same frame + same nibble: vis/XOR-high-nibble blinks must not DMA. */
-    if (s->vram_fr == s->frame && s->vram_nib == want)
+    /* Same frame + same nibble: vis/XOR-high-nibble blinks must not DMA.
+     * NORMAL bolinha is the exception: #143 tagged (FRAME_LEAD, 15) after
+     * paint_all, then SPR_update loadTiles packed nibble 4 over the bank
+     * when AUTO_TILE_UPLOAD was still on (box×3 reuse of crate/flyer
+     * sprites). Later ticks saw vram_nib==15 and skipped, so the volley
+     * colour-cycled forever while boss new-sprites (own-after-place)
+     * stayed white. Always paint_all-15 under the lock. */
+    if (s->vram_fr == s->frame && s->vram_nib == want
+        && !ebullet_normal_lock(s))
         return;
     /* Same art, only sat_col nibble changed. Defer when the queue is
      * already holding SAT-name tiles / NT / first-bind CRAM paint.
@@ -1973,10 +1986,18 @@ static void spr_place(Slot *s, u16 frame)
             s->vram_nib = 0xFF;
         }
         SPR_setAnimAndFrame(s->spr, 0, frame);
+        /* Same #143 own-after as the new-sprite arm. setAnimAndFrame's
+         * updateFrame ORs NEED_TILES_UPLOAD if AUTO_TILE_UPLOAD is on
+         * (crate / flyer leftovers still have it). Box-4 3x38 and any
+         * boss shot that free_enemy-reuses those sprites then sat on
+         * packed nibble 4. Drop the flag and NEED before SPR_update. */
+        s->spr->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
+        shot_vram_own(s->spr);
         if (s->cram_nib && prev != (s16)frame)
             xor_cram_paint(s, s->cram_nib);
         else
             spr_upload_color(s);
+        shot_vram_own(s->spr);
         sat_bind_depth(s->spr, sat_depth_primary(s));
         if (shot_art_shareable(s))
             spr_sync_proj(s);
@@ -2880,6 +2901,8 @@ static void spawn_ebullet_dir(s16 x, s16 y, u8 dir)
     if (!e)
         return;
     xor_cram_release(e);
+    if (e->spr)
+        shot_vram_own(e->spr);
     e->kind = KIND_EBULLET;
     e->variant = 37;  /* MSX type37 lead; dir is aim only (was mis-typed as type) */
     e->hp = 1;
@@ -3712,6 +3735,8 @@ static void spawn_lead20(s16 x, s16 y)
     if (!c)
         return;
     xor_cram_release(c);
+    if (c->spr)
+        shot_vram_own(c->spr);
     c->kind = KIND_EBULLET;
     c->variant = 20;
     c->hp = 1;
@@ -4194,6 +4219,11 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
      * slot with cram_nib=2/4 would otherwise zero the field and leak
      * a walking PAL2 index onto the new bolinha. */
     xor_cram_release(e);
+    /* free_enemy leaves leftover crate/flyer sprites. Own them before
+     * KIND_EBULLET so setAnimAndFrame cannot OR NEED_TILES_UPLOAD on
+     * packed nibble 4 (red-box 3x38 / boss 73-79 slot reuse). */
+    if (e->spr)
+        shot_vram_own(e->spr);
     e->kind = KIND_EBULLET;
     e->variant = variant;
     e->hp = 1;
@@ -6597,7 +6627,13 @@ static void box_death_drop(s16 sx, s16 sy)
     /* 788f: in-place type 38 + two 8ddb. Port: three type-38 frags
      * through spawn_frag → init_frag → ebullet_apply_vis so leftover
      * last-HP 7860 red (0x89/0x8A/0x87) cannot paint the volley.
+     * free_enemy reuses the crate sprite (and other dead flyers);
+     * init_frag owns leftover SAT and spr_place reuse drops
+     * AUTO_TILE_UPLOAD so packed nibble 4 cannot sit on PAL2[4].
      * NORMAL white / HIGH cycle, same as every other bolinha. */
+    spawn_frag(sx, sy, 3, 38);
+    spawn_frag(sx, sy, 5, 38);
+    spawn_frag(sx, sy, 4, 38);
     spawn_frag(sx, sy, 3, 38);
     spawn_frag(sx, sy, 5, 38);
     spawn_frag(sx, sy, 4, 38);
