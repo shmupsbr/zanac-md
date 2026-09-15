@@ -250,7 +250,16 @@ def main() -> int:
         return fail("spr_place must always spr_upload_color after addSprite")
     if "SPR_FLAG_AUTO_TILE_UPLOAD" not in place:
         return fail("spr_place must drop AUTO_TILE_UPLOAD (SGDK updateFrame loadTiles)")
-    print("  spr_place: always paint_all; no share-tag skip")
+    if place.count("SPR_FLAG_AUTO_TILE_UPLOAD") < 2:
+        return fail("spr_place must drop AUTO_TILE_UPLOAD on new-sprite AND reuse (box×3)")
+    reuse = ""
+    if "if (!s->spr)" in place:
+        reuse = place.split("if (!s->spr)", 1)[1]
+        if "\n    else\n    {" in reuse:
+            reuse = reuse.split("\n    else\n    {", 1)[1]
+    if "SPR_FLAG_AUTO_TILE_UPLOAD" not in reuse or reuse.count("shot_vram_own") < 2:
+        return fail("spr_place reuse arm must own-after setAnimAndFrame (crate leftover)")
+    print("  spr_place: always paint_all; no share-tag skip; reuse owned")
 
     wanted = fn_span(ent, "static int xor_cram_wanted(const Slot *s)") or ""
     bind = fn_span(ent, "static int xor_cram_bind(Slot *s, u8 col)") or ""
@@ -273,6 +282,13 @@ def main() -> int:
     up = fn_span(ent, "static void spr_upload_color(Slot *s)") or ""
     if "shot_vram_own" not in up:
         return fail("spr_upload_color must own tiles after paint_all")
+    skip = re.search(
+        r"if\s*\(\s*s->vram_fr\s*==\s*s->frame\s*&&\s*s->vram_nib\s*==\s*want"
+        r"[\s\S]{0,80}?\)\s*return;",
+        up,
+    )
+    if not skip or "ebullet_normal_lock" not in skip.group(0):
+        return fail("spr_upload_color matching-vram skip must refuse NORMAL lock")
     if "dma_nibble_defer" in up and "ebullet_bolinha" not in up[
         max(0, up.find("dma_nibble_defer") - 40) : up.find("dma_nibble_defer") + 80
     ]:
@@ -290,7 +306,11 @@ def main() -> int:
         return fail("init_frag must apply_vis before spr_place (EC)")
     if initf.find("ebullet_apply_vis", place) < 0:
         return fail("init_frag must apply_vis after spr_place (NORMAL owns SAT)")
-    print("  init_frag: apply_vis before and after spr_place")
+    kind_at = initf.find("e->kind = KIND_EBULLET")
+    own_at = initf.find("shot_vram_own")
+    if own_at < 0 or kind_at < 0 or own_at > kind_at:
+        return fail("init_frag must shot_vram_own leftover SAT before KIND_EBULLET")
+    print("  init_frag: apply_vis before and after spr_place; leftover SAT owned")
 
     # Spawners of bolinhas: boxes 3x38, guns 21/38, base 21/42/43/45.
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)")
@@ -320,6 +340,11 @@ def main() -> int:
     if "base_muzzle" not in fire:
         return fail("base_fire must spawn from the eye muzzle")
     print("  bosses 73-79: types 21/38/42/43/45 via init_frag; no private walk")
+
+    sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""
+    if "ebullet_normal_lock" not in sync or "shot_vram_own" not in sync:
+        return fail("spr_sync_proj must own tiles every visible NORMAL tick")
+    print("  spr_sync_proj: NORMAL own before SPR_update")
 
     gun = fn_span(ent, "static void spawn_child_dir(s16 x, s16 y, u8 stype, u8 dir)")
     if not gun or "spawn_frag(x, y, dir, 21)" not in gun or "spawn_frag(x, y, dir, 38)" not in gun:
@@ -377,6 +402,8 @@ def main() -> int:
         "static void box_kill_7878(Slot *e)",
         "static void base_fire(Slot *e)",
         "static void spawn_child_dir(s16 x, s16 y, u8 stype, u8 dir)",
+        "static void spr_place(Slot *s, u16 frame)",
+        "static void spr_sync_proj(Slot *s)",
     )
     for sig in colour_fns:
         body = fn_span(ent, sig) or ""
