@@ -79,6 +79,16 @@ def main() -> int:
     apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)")
     if not apply:
         return fail("ebullet_apply_vis must be the single bolinha colour helper")
+    # SGDK is C89: rnd() at apply_vis (~1824) must be prototyped before
+    # the definition (~1961) or gcc errors implicit declaration / types.
+    apply_at = ent.find("static void ebullet_apply_vis")
+    proto = re.search(r"static u8 rnd\(void\);", ent)
+    rnd_def = re.search(r"static u8 rnd\(void\)\s*\{", ent)
+    if not proto or apply_at < 0 or proto.start() > apply_at:
+        return fail("static u8 rnd(void); must precede ebullet_apply_vis (SGDK C89)")
+    if not rnd_def or proto.start() > rnd_def.start():
+        return fail("rnd prototype must precede static u8 rnd(void) {")
+    print("  KEEP: rnd() prototyped before ebullet_apply_vis (SGDK C89)")
     if "options_bullet_high" not in apply:
         return fail("ebullet_apply_vis must read BULLET VISIBILITY")
     if mentions_skill(apply):

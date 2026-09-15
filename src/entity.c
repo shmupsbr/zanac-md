@@ -626,6 +626,8 @@ static void riser_dma_sgt(Slot *s);
 static void spr_sync_proj(Slot *s);
 static void spr_place(Slot *s, u16 frame);
 static void shot_vram_reset(void);
+/* ebullet_apply_vis (HIGH 8659) calls rnd() before the definition. */
+static u8 rnd(void);
 
 /*
  * entity_dispatch 0x445F: SAT ptr E000, walk E300 stride 0x20 (B=0x1A).
