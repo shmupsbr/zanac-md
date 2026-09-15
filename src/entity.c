@@ -347,8 +347,11 @@
 #define KIND_FIRE       3
 /* Fire 0/1/2/7 72de owns PAL2[13]. Shot-bank keys use the same index. */
 #define FIRE7_CRAM_NIB  13
-/* Type 21 8659 colour-walk: FRAME_LIGHT_BAR is the only baked-4 art.
- * Bind tiles to PAL2[4] once and cycle CRAM so bars share the shot bank.
+/* Type 21 8659 colour-walk. Pat 6 is a short 15x5 bar (the colour-cycling
+ * enemy shot Filipe called bolinha). Bind every nonzero body nibble to
+ * PAL2[4] once and cycle CRAM so bars share one shot-bank key.
+ * Do not verbatim-DMA baked-4: SGDK may pack the index off 4 onto 15
+ * (TMS white), and PAL2[4] then pulses while the shot stays white.
  * XOR walkers stay on nibble 2 (tests forbid 4 in k_xor_cram_nib). */
 #define LIGHTBAR_CRAM_NIB  4
 #define KIND_BOX        4
@@ -766,6 +769,11 @@ static u8 proj_tile_want(const Slot *s)
     u8 baked;
     u8 want;
 
+    /* Type 21 keys the bank on PAL2[4] even before xor_cram_bind.
+     * Leftover sat_col 0x8F (previous lead) would otherwise bank
+     * (LIGHT_BAR, 15) and leave 8659 cycling an unused CRAM slot. */
+    if (s->kind == KIND_EBULLET && s->variant == 21)
+        return LIGHTBAR_CRAM_NIB;
     if (s->cram_nib)
         return s->cram_nib;
     if (s->kind == KIND_FIRE && s_fire7_cram)
@@ -808,13 +816,16 @@ static int shot_bank_lookup(u8 frame, u8 nib, u16 *out)
 }
 
 /* Sit on a banked index. SPR_setVRAMTileIndex(-1→manual) releases the
- * sprite's AUTO slot via the sprite engine VRAM region (not VDP_*Tiles). */
+ * sprite's AUTO slot via the sprite engine VRAM region (not VDP_*Tiles).
+ * Drop AUTO_TILE_UPLOAD first: setVRAMTileIndex sets NEED_TILES_UPLOAD
+ * when that flag is still on and SPR_update would DMA the raw PNG
+ * (often nibble 15) over the shared CRAM-painted tiles. */
 static void shot_vram_point(Sprite *sp, u16 idx)
 {
     if (!sp)
         return;
-    SPR_setVRAMTileIndex(sp, (s16)idx);
     SPR_setAutoTileUpload(sp, FALSE);
+    SPR_setVRAMTileIndex(sp, (s16)idx);
 }
 
 /* Bank owns these tiles until SPR_reset. Do not SPR_setVRAMTileIndex:
@@ -1625,7 +1636,9 @@ static void spr_upload_color(Slot *s)
      * keeps +04 colour. FRAME_LOGA_C is unfolded as black (marker art),
      * but Japan draws those bits in sat_col. Other 71f6 pairs stay
      * primary+black at the same draw (Y-0x11 / same X). */
-    if (s->cram_nib)
+    if (s->kind == KIND_EBULLET && s->variant == 21)
+        want = LIGHTBAR_CRAM_NIB;
+    else if (s->cram_nib)
         want = s->cram_nib;
     else if (s->kind == KIND_GUN && s->frame == FRAME_LOGA_C && s->sat_col)
         want = (u8)(s->sat_col & 0x0F);
@@ -1652,8 +1665,12 @@ static void spr_upload_color(Slot *s)
      * Next cool frame uploads the pending nibble. */
     if (s->vram_fr == s->frame && dma_nibble_defer())
         return;
-    /* Shared shot/lead/bar VRAM: retarget attribut, no DMA. */
-    if (shot_vram_prepare(s, want, (u8)ts->numTile))
+    /* Shared shot/lead/bar VRAM: retarget attribut, no DMA.
+     * Type 21 still paint_all after retarget — a prior verbatim
+     * (LIGHT_BAR, 4) bank may hold packed nibble 15. */
+    if (s->kind == KIND_EBULLET && s->variant == 21)
+        (void)shot_vram_prepare(s, want, (u8)ts->numTile);
+    else if (shot_vram_prepare(s, want, (u8)ts->numTile))
         return;
 
     nbytes = (u16)(ts->numTile * 32);
@@ -1666,10 +1683,14 @@ static void spr_upload_color(Slot *s)
     {
         u8 disc = (u8)(s->kind == KIND_EXPL || s->kind == KIND_PDEAD
                        || s->kind == KIND_HUSK);
+        /* Type 21 CRAM: paint every nonzero nibble onto PAL2[4]. A
+         * want==baked verbatim upload leaves SGDK-packed index 15
+         * (white) in VRAM while 8659 cycles the unused PAL2[4]. */
+        u8 paint_bar = (u8)(s->kind == KIND_EBULLET && s->variant == 21);
 
         /* Verbatim tiles: queue ROM/FAR src. Skip the 128-byte copy
          * into a DMA scratch (and do not allocateAndQueue an unused buf). */
-        if (!disc && want == baked)
+        if (!disc && !paint_bar && want == baked)
         {
             DMA_queueDma(DMA_VRAM, (void *)src, vaddr, (u16)(nbytes / 2), 2);
             s->vram_fr = s->frame;
@@ -1683,7 +1704,7 @@ static void spr_upload_color(Slot *s)
          * variant cache; a warm (frame,nibble) slot is a plain queue. */
         {
             const u8 *cached = remap_cache_get(s->frame, baked, want, src,
-                                               nbytes, disc);
+                                               nbytes, (u8)(disc || paint_bar));
             u16 nq = nbytes;
 
             if (nq > REMAP_TILE_BYTES)
@@ -7083,11 +7104,17 @@ static void xor_cram_paint(Slot *s, u8 nib)
         return;
     baked = k_frame_color[s->frame];
     nbytes = (u16)(ts->numTile * 32);
-    if (shot_vram_prepare(s, nib, (u8)ts->numTile))
+    /* Retarget onto a (frame, nibble) bank when one exists. Do not skip
+     * the paint: a prior want==baked upload can sit on nibble 15 while
+     * the bank key says 4. fresh_auto fail (vram_nib != nib) leaves the
+     * leftover slot alone so we do not overwrite type 45's white bar. */
+    if (shot_vram_prepare(s, nib, (u8)ts->numTile) && s->vram_nib != nib)
         return;
     vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);
     src = (const u8 *)FAR_SAFE(ts->tiles, nbytes);
-    cached = remap_cache_get(s->frame, baked, nib, src, nbytes, 0);
+    /* paint_all: packed/baked mismatch (4 vs 15) would leave white
+     * pixels that PAL2[n] never shows. Same as fire7_paint_cram_tiles. */
+    cached = remap_cache_get(s->frame, baked, nib, src, nbytes, 1);
     if (nbytes > REMAP_TILE_BYTES)
         nbytes = REMAP_TILE_BYTES;
     DMA_queueDma(DMA_VRAM, (void *)cached, vaddr, (u16)(nbytes / 2), 2);
