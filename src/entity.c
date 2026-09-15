@@ -643,6 +643,14 @@ static u8 rnd(void);
 #ifndef SPR_FLAG_AUTO_DEPTH
 #define SPR_FLAG_AUTO_DEPTH 0x0200
 #endif
+/* SGDK sprite_eng.c NEED_TILES_UPLOAD (not a public SPR_FLAG).
+ * 2.11 / current engine: 0x0004. SPR_update loadTiles() of the raw
+ * objs.png (SGDK-packed nibble 4 on FRAME_LEAD) if this bit stays
+ * set after we paint_all onto 15 — NORMAL bolinhas then sit on
+ * PAL2[4] (TMS dark blue) instead of white. HIGH still wants 4. */
+#ifndef SPR_FLAG_NEED_TILES_UPLOAD
+#define SPR_FLAG_NEED_TILES_UPLOAD  0x0004
+#endif
 /* Slot-walk depths. 0 beats leftover Y in both signed and unsigned sorts. */
 #define SAT_DEPTH_PLAYER    0
 #define SAT_DEPTH_SHOT      1
@@ -781,20 +789,23 @@ static int ebullet_lead_disc(const Slot *s)
             || v == 41 || v == 42 || v == 43);
 }
 
-/* Every on-screen tiro bolinha: lead discs, type 21 light-bar, type 45
- * bar/med pulse. Boxes (3x type 38), edge guns (k_gun 21/38),
- * spawners, wide 84-86, both bosses (73-79 fire 21/38/42/43/45).
- * Prefer over-including a bolinha-like shot over another Easy cycler. */
+/* Every KIND_EBULLET is a tiro bolinha. Named types stay listed so a
+ * future non-disc ebullet cannot silently drop out of vis: FRAME_LEAD
+ * 20/37/38/41/42/43, FRAME_LIGHT_BAR 21, type 45 bar/med. Boxes
+ * (3x type 38), edge guns (k_gun 21/38), spawners, wide 84-86, both
+ * bosses (73-79 fire 21/38/42/43/45). Skill / ALC never enter. */
 static int ebullet_bolinha(const Slot *s)
 {
     u8 v;
 
-    if (ebullet_lead_disc(s))
-        return 1;
     if (s->kind != KIND_EBULLET)
         return 0;
+    if (ebullet_lead_disc(s))
+        return 1;
     v = (u8)(s->variant & 0x7F);
-    return (v == 21 || v == 45);
+    if (v == 21 || v == 45)
+        return 1;
+    return 1;
 }
 
 /* OPTIONS BULLET VISIBILITY only. Skill / ALC never enter:
@@ -865,6 +876,18 @@ static int shot_bank_lookup(u8 frame, u8 nib, u16 *out)
     return 0;
 }
 
+/* We own tile pixels. SPR_update loadTiles() of packed objs.png
+ * (FRAME_LEAD nibble 4) if NEED_TILES_UPLOAD stays set — that is
+ * why NORMAL vis still showed coloured / dark-blue bolinhas after
+ * #140 paint_all-to-15. HIGH keys nibble 4 on purpose. */
+static void shot_vram_own(Sprite *sp)
+{
+    if (!sp)
+        return;
+    SPR_setAutoTileUpload(sp, FALSE);
+    sp->status &= (u16)~SPR_FLAG_NEED_TILES_UPLOAD;
+}
+
 /* Sit on a banked index. SPR_setVRAMTileIndex(-1→manual) releases the
  * sprite's AUTO slot via the sprite engine VRAM region (not VDP_*Tiles).
  * Drop AUTO_TILE_UPLOAD first: setVRAMTileIndex sets NEED_TILES_UPLOAD
@@ -874,12 +897,8 @@ static void shot_vram_point(Sprite *sp, u16 idx)
 {
     if (!sp)
         return;
+    shot_vram_own(sp);
     SPR_setAutoTileUpload(sp, FALSE);
-#ifdef SPR_FLAG_NEED_TILES_UPLOAD
-    /* setAnimAndFrame may have armed this while AUTO was still on.
-     * SPR_update would DMA packed nibble 15 over the shared CRAM tiles. */
-    sp->status &= (u16)~SPR_FLAG_NEED_TILES_UPLOAD;
-#endif
     SPR_setVRAMTileIndex(sp, (s16)idx);
 }
 
@@ -1720,7 +1739,8 @@ static void spr_upload_color(Slot *s)
     /* Same art, only sat_col nibble changed. Defer when the queue is
      * already holding SAT-name tiles / NT / first-bind CRAM paint.
      * Next cool frame uploads the pending nibble. */
-    if (s->vram_fr == s->frame && dma_nibble_defer())
+    if (s->vram_fr == s->frame && dma_nibble_defer()
+        && !ebullet_bolinha(s))
         return;
     /* Shared shot/lead/bar VRAM: retarget attribut, no DMA.
      * Type 21 still paint_all after retarget — a prior verbatim
@@ -1755,6 +1775,7 @@ static void spr_upload_color(Slot *s)
             s->vram_fr = s->frame;
             s->vram_nib = want;
             shot_vram_remember(s, want, (u8)ts->numTile);
+            shot_vram_own(sp);
             return;
         }
 
@@ -1783,6 +1804,7 @@ static void spr_upload_color(Slot *s)
         s->vram_fr = s->frame;
         s->vram_nib = want;
         shot_vram_remember(s, want, (u8)ts->numTile);
+        shot_vram_own(sp);
     }
 }
 
@@ -1790,14 +1812,27 @@ static void spr_frame_cb(Sprite *sp)
 {
     Slot *s = (Slot *)(u32)sp->data;
 
-    /* We own tile upload so sat_col remaps are not overwritten. */
-    sp->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
+    /* We own tile upload so sat_col remaps are not overwritten.
+     * Also drop NEED_TILES_UPLOAD (packed PNG nibble 4). */
+    shot_vram_own(sp);
     if (s)
         spr_upload_color(s);
 }
 
 static void spr_set_sat_col(Slot *s, u8 col)
 {
+    /* Every colour tick: NORMAL bolinha never CRAM-walks. Leftover
+     * cram_nib (HIGH bind, slot reuse) would cycle PAL2[4] and
+     * sat_col_tile_nibble would keep tiles on 4. */
+    if (ebullet_bolinha(s) && !options_bullet_high())
+    {
+        if (s->cram_nib)
+            xor_cram_release(s);
+        s->sat_col = 0x8F;
+        if (s->spr && s->spr->frame)
+            spr_upload_color(s);
+        return;
+    }
     /* Japan +04 XOR / 72de is one SAT-colour write. After a CRAM bind
      * the tiles stay on that nibble; later ticks only write PAL2[n]. */
     if (s->cram_nib)
@@ -1813,10 +1848,12 @@ static void spr_set_sat_col(Slot *s, u8 col)
 }
 
 /* One colour path for every tiro bolinha. Call from every arming
- * (init_frag / spawn_lead20 / spawn_ebullet_dir / stream 20) and every
- * per-frame 8659 site (type 20, 21/37/38/42/43/45, 41, init_ret).
- * NORMAL: force 0x8F white+EC, no walk. HIGH: 8659 R-nibble|0x80.
- * Skill / ALC never enter. */
+ * (init_frag / spawn_lead20 / spawn_ebullet_dir / stream 20) AND
+ * again after spr_place so the first SAT exists when NORMAL forces
+ * nibble 15. Per-frame 8659 sites: type 20, 21/37/38/42/43/45, 41,
+ * init_ret. NORMAL: 0x8F white+EC, skip CRAM/8659 entirely (gated
+ * inside spr_set_sat_col). HIGH: 8659 R-nibble|0x80. Skill / ALC
+ * never enter. */
 static void ebullet_apply_vis(Slot *e)
 {
     if (!ebullet_bolinha(e))
@@ -2825,6 +2862,7 @@ static void spawn_ebullet_dir(s16 x, s16 y, u8 dir)
     e->alive = 1;
     ebullet_apply_vis(e);        /* vis owns +04; Japan 84eb is 0x8F */
     spr_place(e, FRAME_LEAD);
+    ebullet_apply_vis(e);
     /* 84fa RET: same first-visit skip as init_frag variant 37. */
     {
         u8 idx = (u8)(e - s_en);
@@ -3654,6 +3692,7 @@ static void spawn_lead20(s16 x, s16 y)
     c->cram_col = 0;
     ebullet_apply_vis(c);        /* vis owns +04; Japan 8672 is 0x8F */
     spr_place(c, FRAME_LEAD);
+    ebullet_apply_vis(c);
 }
 
 /* handler_type59 @ 0x8269: dir=+0x1a&0x0F; JP 81a8 (speed 5,
@@ -4197,10 +4236,14 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     }
     e->alive = 1;
     /* Japan 863b: type 21 writes no +04 (variant != 21 was 0x8F).
-     * Vis helper owns every bolinha: NORMAL 0x8F, HIGH 8659. */
+     * Vis helper owns every bolinha: NORMAL 0x8F, HIGH 8659.
+     * Apply before spr_place so EC bit7 is set for mode_draw_x, then
+     * again after so NORMAL paint_all-15 owns the new SAT (first
+     * place used to leave NEED_TILES_UPLOAD / packed nibble 4). */
     ebullet_apply_vis(e);
     /* 21: SAT 0x18 pat 6. 45: 850b writes 0x1C then 8625 pulses 0x18/0x20. */
     spr_place(e, (variant == 21 || variant == 45) ? FRAME_LIGHT_BAR : FRAME_LEAD);
+    ebullet_apply_vis(e);
     /* 37 84fa / 38 8524 / 41 857e / 21 8656: SET 7 RET.
      * 42/43: CALL 84e3/8507 (those RETs return into XOR) then 85ed RET.
      * Type 20 init falls into 4898; type 45 CALL 850b then 8608/82a4. */
@@ -5509,6 +5552,7 @@ static int spawn_from_type(u8 t)
         e->cram_col = 0;
         ebullet_apply_vis(e);        /* vis owns +04; Japan 8672 is 0x8F */
         spr_place(e, FRAME_LEAD);
+        ebullet_apply_vis(e);
     }
     else if (t == 56)
         spawn_sig(e);
@@ -6394,6 +6438,7 @@ static void update_enemies(void)
                 }
                 /* clock LSB 0: FRAME_LIGHT_BAR SAT 0x18; 1: FRAME_MED_CIRCLE 0x20 */
                 spr_place(e, (e->clock & 1) ? FRAME_MED_CIRCLE : FRAME_LIGHT_BAR);
+                ebullet_apply_vis(e);
             }
             if (step_88_4898(e))
                 continue;
@@ -6504,7 +6549,10 @@ static void box_kill_7878(Slot *e);
 
 static void box_death_drop(s16 sx, s16 sy)
 {
-    /* 788f: in-place type 38 + two 8ddb. Port: three type-38 frags. */
+    /* 788f: in-place type 38 + two 8ddb. Port: three type-38 frags
+     * through spawn_frag → init_frag → ebullet_apply_vis so leftover
+     * last-HP 7860 red (0x89/0x8A/0x87) cannot paint the volley.
+     * NORMAL white / HIGH cycle, same as every other bolinha. */
     spawn_frag(sx, sy, 3, 38);
     spawn_frag(sx, sy, 5, 38);
     spawn_frag(sx, sy, 4, 38);
@@ -6526,7 +6574,13 @@ static void box_kill_7878(Slot *e)
     }
     if (drop == 4)
     {
-        spr_kill(e);
+        /* Japan 788f converts this slot in-place then two 8ddb.
+         * Drop crate SAT / complement first: last-HP 7860 red 0x89
+         * and FRAME_BOX must not ride the 3x38 volley. */
+        spr_detach(e);
+        e->alive = 0;
+        e->kind = 0;
+        e->sat_col = 0;
         box_death_drop(sx, sy);
         return;
     }
@@ -7116,7 +7170,7 @@ static void xor_cram_release(Slot *s)
     if (!s->cram_nib)
         return;
     if (s->cram_nib == LIGHTBAR_CRAM_NIB
-        && ebullet_cram_shot(s))
+        && (ebullet_cram_shot(s) || ebullet_bolinha(s)))
     {
         if (s_bar_cram_refs)
             s_bar_cram_refs--;
@@ -7165,6 +7219,9 @@ static u8 xor_cram_alloc(const Slot *s)
  * Type 21 8659 owns PAL2[4] (FRAME_LIGHT_BAR bake). Other 0x84 sit on 12. */
 static u8 sat_col_tile_nibble(const Slot *s, u8 want)
 {
+    /* NORMAL bolinha: never sit on leftover CRAM (PAL2[4] 8659). */
+    if (ebullet_bolinha(s) && !options_bullet_high())
+        return 15;
     if (s->cram_nib)
         return s->cram_nib;
     if (want == FIRE7_CRAM_NIB && s->kind != KIND_FIRE)
@@ -7241,6 +7298,7 @@ static void xor_cram_paint(Slot *s, u8 nib)
     s->vram_fr = s->frame;
     s->vram_nib = nib;
     shot_vram_remember(s, nib, (u8)ts->numTile);
+    shot_vram_own(sp);
 }
 
 static int xor_cram_bind(Slot *s, u8 col)

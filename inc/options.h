@@ -71,14 +71,15 @@
 #define EXTEND_MODE_MAX         EXTEND_NONE
 
 /*
- * BULLET VISIBILITY. Independent of SKILL LEVEL / ALC: Easy, Normal,
- * and Hard must not gate or override white vs colour-cycle.
- * Default NORMAL = Japan white bolinha (FRAME_LEAD types
- * 20/37/38/41/42/43, FRAME_LIGHT_BAR type 21, type 45 bar/med,
- * sat_col 0x8F / baked nibble 15). HIGH restores the #136 PAL2[4]
- * 8659 colour-walk on every one of those (k_gun 48/49/52-55,
- * box-4 volleys, edge spawners, type-73..79 base_fire).
- * Skill / ALC never override this.
+ * BULLET VISIBILITY. Zero relationship with SKILL LEVEL / ALC.
+ * Easy / Normal / Hard must never change bolinha colour. The only
+ * switch is this option, for every enemy and every boss, whole game:
+ *   NORMAL (default) = Japan white (0x8F / nibble 15), no 8659.
+ *   HIGH = #136 PAL2[4] 8659 colour-walk on the same shots.
+ * Scope: FRAME_LEAD 20/37/38/41/42/43, FRAME_LIGHT_BAR 21, type 45
+ * bar/med, k_gun 48/49/52-55, box-4 3x38 volleys, edge spawners,
+ * type-73..79 base_fire. SGDK-packed FRAME_LEAD nibble 4 must not
+ * sit on PAL2[4] when NORMAL.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1
