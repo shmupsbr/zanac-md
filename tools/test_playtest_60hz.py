@@ -203,8 +203,10 @@ def main() -> int:
         return fail("type 21 light bars must share the shot VRAM bank")
     if "LIGHTBAR_CRAM_NIB" not in ent:
         return fail("type 21 8659 must CRAM-bind (LIGHTBAR_CRAM_NIB), not remap")
-    if not re.search(r"TYPE21_CRAM_NIB\s+3", ent):
-        return fail("type 21 CRAM nibble must be 3 (not packed FRAME_LEAD 4)")
+    if re.search(r"TYPE21_CRAM_NIB\s+3\b", ent):
+        return fail("type 21 CRAM nibble must not be flyer green 3")
+    if not re.search(r"TYPE21_CRAM_NIB\s+5", ent):
+        return fail("type 21 CRAM nibble must be 5 (not packed FRAME_LEAD 4)")
     if re.search(r"#define\s+LIGHTBAR_CRAM_NIB\s+4\b", ent):
         return fail("type 21 must not walk packed FRAME_LEAD nibble 4")
     if "spr_sync_proj" not in ent:

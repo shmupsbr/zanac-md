@@ -119,13 +119,15 @@ def main() -> int:
         return fail("LEAD_PACKED_NIB must be SGDK FRAME_LEAD 4")
     if not re.search(r"#define\s+LEAD_WHITE_NIB\s+15", ent):
         return fail("LEAD_WHITE_NIB must be Japan 0x8F / 15")
-    if not re.search(r"#define\s+TYPE21_CRAM_NIB\s+3", ent):
-        return fail("TYPE21_CRAM_NIB must be dedicated 3")
+    if re.search(r"#define\s+TYPE21_CRAM_NIB\s+3\b", ent):
+        return fail("TYPE21_CRAM_NIB must not be flyer green 3 (purple plane)")
     if re.search(r"#define\s+LIGHTBAR_CRAM_NIB\s+4\b", ent):
         return fail("LIGHTBAR_CRAM_NIB must not be packed lead 4")
-    if "type21_cram_not_packed" not in ent or "type21_cram_not_white" not in ent:
-        return fail("C89 static asserts: type 21 nibble != 4 and != 15")
-    print("  CRAM: type 21 nibble 3; packed lead 4; white 15 — isolated")
+    if not re.search(r"#define\s+TYPE21_CRAM_NIB\s+5", ent):
+        return fail("TYPE21_CRAM_NIB must be dedicated 5 (not flyer 3 / packed 4 / white 15)")
+    if "type21_cram_not_flyer" not in ent or "type21_cram_not_white" not in ent:
+        return fail("C89 static asserts: type 21 nibble != 3 and != 15")
+    print("  CRAM: type 21 nibble 5; flyer 3; packed lead 4; white 15")
 
     # 4. leave_white is any-index, not same-frame. No FRAME_LEAD share with 21.
     leave = fn_span(ent, "static int shot_vram_leave_white(Sprite *sp, u8 nib)") or ""

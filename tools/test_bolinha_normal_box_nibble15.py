@@ -63,8 +63,10 @@ def main() -> int:
 
     if not re.search(r"#define\s+LEAD_WHITE_NIB\s+15", ent):
         return fail("LEAD_WHITE_NIB must stay 15")
-    if not re.search(r"#define\s+TYPE21_CRAM_NIB\s+3", ent):
-        return fail("TYPE21_CRAM_NIB must stay 3 (not 15, not packed 4)")
+    if re.search(r"#define\s+TYPE21_CRAM_NIB\s+3\b", ent):
+        return fail("TYPE21_CRAM_NIB must not be flyer green 3")
+    if not re.search(r"#define\s+TYPE21_CRAM_NIB\s+5", ent):
+        return fail("TYPE21_CRAM_NIB must be dedicated 5")
     if "type21_cram_not_white" not in ent or "fire7_cram_not_white" not in ent:
         return fail("C89 asserts: type 21 / fire 7 must not be nibble 15")
     print("  nibbles: white 15; type 21 = 3; fire 7 != 15")
@@ -107,6 +109,8 @@ def main() -> int:
         return fail("pal2_write missing")
     if "LEAD_WHITE_NIB" not in pal or "k_tms_vdp[LEAD_WHITE_NIB]" not in pal:
         return fail("pal2_write must force PAL2[15] to TMS white")
+    if "FLYER_GREEN_NIB" not in pal or "k_tms_vdp[FLYER_GREEN_NIB]" not in pal:
+        return fail("pal2_write must force PAL2[3] to TMS light green")
     # Walkers must not PAL_setColor PAL2+n themselves (15 is locked).
     outside_pal2 = ent
     pal_fn = fn_span(ent, "static void pal2_write(u8 nib, u16 color)") or ""

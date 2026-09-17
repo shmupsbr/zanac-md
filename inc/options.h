@@ -80,19 +80,14 @@
  * k_gun type-38 children, box-4 3x38 volleys, edge spawners,
  * type-73..79 FRAME_LEAD / type-45 fire. Type 21 FRAME_LIGHT_BAR
  * (`<===>`) is Japan 8659 always — it does not enter this switch.
- * Type 21 CRAM is a dedicated nibble, not SGDK-packed FRAME_LEAD 4
- * and not white 15: #146 still walked PAL2[4] while discs sat on
- * packed 4 (leave_white keyed the wrong frame on slot reuse).
- * #147 isolated type 21 onto PAL2[3] and DMA'd white from a RAM
- * paint_all-15 cache. Filipe after that rebuild: box×3 still cycled
- * (red/yellow/green). The 12-slot shot bank can fail to tag a painted
- * FRAME_LEAD index; leftover crate/type21 SAT then gets first
- * apply_vis painted as (oldframe,15), type 21 / fire 7 DMA a walked
- * nibble into the untagged disc, and one of the three cycles.
+ * Type 21 CRAM is a dedicated nibble, not SGDK-packed FRAME_LEAD 4,
+ * not white 15, and not flyer green 3. #147 walked PAL2[3]; type 44
+ * sat_col 0x83 (TMS 3 light green) went purple (alias to nibble 12
+ * + 0x8D magenta, and 8659 on PAL2[3]). HIGH / type 21 walk PAL2[5].
  * NORMAL FRAME_LEAD pixels are nibble 15 only (keep_body). PAL2[15]
- * is fixed white — no PAL_setColor walk. Locked white VRAM indices
- * are never-evicted and type 21 / HIGH / xor / fire 7 cannot DMA
- * onto them. Share the proven white bank; no per-tick rebuild.
+ * and PAL2[3] are fixed white / light green. Locked white VRAM
+ * indices are never-evicted; type 21 / HIGH / xor / fire 7 cannot
+ * DMA onto them. Share the proven white bank; no per-tick rebuild.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1

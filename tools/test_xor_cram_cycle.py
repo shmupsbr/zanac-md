@@ -108,8 +108,10 @@ def main() -> int:
         return fail("type 21 8659 random colour must CRAM")
     if "LIGHTBAR_CRAM_NIB" not in ent:
         return fail("type 21 must own a dedicated CRAM nibble (not XOR pool 2)")
-    if not re.search(r"TYPE21_CRAM_NIB\s+3", ent):
-        return fail("type 21 CRAM must be dedicated nibble 3 (not packed lead 4)")
+    if re.search(r"TYPE21_CRAM_NIB\s+3\b", ent):
+        return fail("type 21 CRAM must not be flyer green 3")
+    if not re.search(r"TYPE21_CRAM_NIB\s+5", ent):
+        return fail("type 21 CRAM must be dedicated nibble 5")
     if re.search(r"#define\s+LIGHTBAR_CRAM_NIB\s+4\b", ent):
         return fail("type 21 must not walk SGDK-packed FRAME_LEAD nibble 4")
     alloc = fn_span(ent, "static u8 xor_cram_alloc(const Slot *s)")

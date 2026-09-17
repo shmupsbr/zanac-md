@@ -110,6 +110,19 @@ def main() -> int:
         return fail("type 44 visual is FRAME_PLANE SAT 0x40")
     print("  type 44: KIND_GROUND sat_col 0x83 FRAME_PLANE")
 
+    # #147 walked PAL2[3] / aliased 0x83 onto nibble 12 (magenta).
+    if re.search(r"#define\s+TYPE21_CRAM_NIB\s+3\b", ent):
+        return fail("type 21 8659 must not walk PAL2[3] (green flyer)")
+    if not re.search(r"#define\s+FLYER_GREEN_NIB\s+3", ent):
+        return fail("FLYER_GREEN_NIB must be TMS 3")
+    nib = fn_span(ent, "static u8 sat_col_tile_nibble(const Slot *s, u8 want)") or ""
+    if "FLYER_GREEN_NIB" not in nib:
+        return fail("sat_col_tile_nibble must keep flyer nibble 3 (no 12 alias)")
+    palw = fn_span(ent, "static void pal2_write(u8 nib, u16 color)") or ""
+    if "FLYER_GREEN_NIB" not in palw:
+        return fail("pal2_write must refuse to 8659-walk PAL2[3]")
+    print("  CRAM: PAL2[3] locked light green; type 21 walks nibble 5")
+
     lust = fn_span(ent, "static void spawn_luster(Slot *e, u8 type)")
     if not lust:
         return fail("spawn_luster not found")

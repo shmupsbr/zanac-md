@@ -365,20 +365,28 @@
  * FRAME_LEAD index, leftover SAT was uploaded as (oldframe,15), and
  * type 21 / fire 7 DMA'd a walked nibble into the untagged disc.
  * NORMAL discs lock a never-evicted white VRAM index; pixels are
- * nibble 15 only; PAL2[15] is not a walker. */
+ * nibble 15 only; PAL2[15] is not a walker.
+ *
+ * #147 TYPE21_CRAM_NIB=3 walked PAL2[3]. Type 44 green flyer is
+ * sat_col 0x83 (TMS 3 light green). sat_col_tile_nibble then aliased
+ * want==3 to nibble 12; 0x8D writes magenta there — purple plane. */
 #define LEAD_PACKED_NIB     4   /* SGDK FRAME_LEAD pixels; never 8659 */
 #define LEAD_WHITE_NIB     15   /* NORMAL Japan 0x8F bake; never walked */
-#define TYPE21_CRAM_NIB     3   /* type 21 / HIGH 8659; not packed 4 */
+#define FLYER_GREEN_NIB     3   /* type 44 / veybar 22/23 sat_col 0x83 */
+#define TYPE21_CRAM_NIB     5   /* type 21 / HIGH 8659; not flyer 3 */
 #define LIGHTBAR_CRAM_NIB   TYPE21_CRAM_NIB
 #define XOR_CRAM_NIB        2   /* SIG/FLASH pool; not a bolinha nibble */
-/* C89 static asserts: type 21 must not walk lead packed/white/fire/XOR. */
+/* C89 static asserts: type 21 must not walk flyer/lead/white/fire/XOR. */
+typedef char type21_cram_not_flyer[(TYPE21_CRAM_NIB != FLYER_GREEN_NIB) ? 1 : -1];
 typedef char type21_cram_not_packed[(TYPE21_CRAM_NIB != LEAD_PACKED_NIB) ? 1 : -1];
 typedef char type21_cram_not_white[(TYPE21_CRAM_NIB != LEAD_WHITE_NIB) ? 1 : -1];
 typedef char type21_cram_not_fire[(TYPE21_CRAM_NIB != FIRE7_CRAM_NIB) ? 1 : -1];
 typedef char type21_cram_not_xor[(TYPE21_CRAM_NIB != XOR_CRAM_NIB) ? 1 : -1];
 typedef char type21_cram_not_trans[(TYPE21_CRAM_NIB != 0) ? 1 : -1];
+typedef char type21_cram_not_black[(TYPE21_CRAM_NIB != 1) ? 1 : -1];
 typedef char fire7_cram_not_white[(FIRE7_CRAM_NIB != LEAD_WHITE_NIB) ? 1 : -1];
 typedef char xor_cram_not_white[(XOR_CRAM_NIB != LEAD_WHITE_NIB) ? 1 : -1];
+typedef char xor_cram_not_flyer[(XOR_CRAM_NIB != FLYER_GREEN_NIB) ? 1 : -1];
 #define KIND_BOX        4
 #define KIND_DUSTER     10
 #define KIND_TERUZO     12
@@ -7496,13 +7504,24 @@ static const u16 k_tms_vdp[16] = {
  * FRAME_LEAD pixel. Restore-to-white is the only allowed store. */
 static void pal2_write(u8 nib, u16 color)
 {
-    if ((u8)(nib & 0x0F) == LEAD_WHITE_NIB)
+    nib = (u8)(nib & 0x0F);
+    /* NORMAL discs: nibble 15 is TMS white. Type 44 flyer / veybar
+     * 22/23: nibble 3 is TMS light green. 8659 / xor / fire 7 must
+     * never walk either — #147 magenta on PAL2[3] was the purple
+     * triangle. Restore-to-canonical is the only allowed store. */
+    if (nib == LEAD_WHITE_NIB)
     {
         PAL_setColor((u16)((PAL2 * 16) + LEAD_WHITE_NIB),
                      k_tms_vdp[LEAD_WHITE_NIB]);
         return;
     }
-    PAL_setColor((u16)((PAL2 * 16) + (nib & 0x0F)), color);
+    if (nib == FLYER_GREEN_NIB)
+    {
+        PAL_setColor((u16)((PAL2 * 16) + FLYER_GREEN_NIB),
+                     k_tms_vdp[FLYER_GREEN_NIB]);
+        return;
+    }
+    PAL_setColor((u16)((PAL2 * 16) + nib), color);
 }
 
 static void fire7_cram_restore(void)
@@ -7655,6 +7674,10 @@ static u8 sat_col_tile_nibble(const Slot *s, u8 want)
     /* NORMAL bolinha: never sit on leftover CRAM (type 21 8659). */
     if (ebullet_normal_lock(s))
         return 15;
+    /* Type 44 / veybar 22/23 sat_col 0x83. #147 aliased this onto
+     * nibble 12 (0x8D magenta) because TYPE21_CRAM_NIB was 3. */
+    if (want == FLYER_GREEN_NIB)
+        return FLYER_GREEN_NIB;
     if (s->cram_nib)
         return s->cram_nib;
     if (want == FIRE7_CRAM_NIB && s->kind != KIND_FIRE)
@@ -7837,6 +7860,7 @@ void entity_init(void)
      * title_md_palette): Lord-Nightmare RGB24 collapsed TMS 2 and 12. */
     PAL_setPalette(PAL2, k_tms_vdp, CPU);
     pal2_write(LEAD_WHITE_NIB, k_tms_vdp[LEAD_WHITE_NIB]);
+    pal2_write(FLYER_GREEN_NIB, k_tms_vdp[FLYER_GREEN_NIB]);
     white_lock_reset();
     /* PAL2[2] and PAL2[3] used to be overridden to half brightness so the
      * flyers would read against the map. That was compensation for a palette
