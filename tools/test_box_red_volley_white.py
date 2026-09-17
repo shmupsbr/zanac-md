@@ -129,7 +129,7 @@ def main() -> int:
     print("  7878: type4→3x38 / type5 expl / type6 chip; crate SAT dropped")
 
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
-    if drop.count("spawn_frag") < 3 or drop.count(", 38)") < 3:
+    if drop.count("spawn_frag(") != 3 or drop.count(", 38)") != 3:
         return fail("red box volley must be three spawn_frag(..., 38)")
     if "spr_set_sat_col" in drop or "0x80" in drop:
         return fail("box_death_drop must not private-walk colour")

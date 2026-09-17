@@ -97,7 +97,7 @@ def main() -> int:
     if "ebullet_lead_disc" not in boli:
         return fail("ebullet_bolinha must include lead discs")
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
-    if drop.count("spawn_frag") < 3 or ", 38)" not in drop:
+    if drop.count("spawn_frag(") != 3 or ", 38)" not in drop:
         return fail("boxes still 3x type 38")
     fire = fn_span(ent, "static void base_fire(Slot *e)") or ""
     if "spawn_frag(x, y, 0, 42)" not in fire:

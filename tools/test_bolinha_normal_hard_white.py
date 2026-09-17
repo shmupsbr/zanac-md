@@ -171,7 +171,7 @@ def main() -> int:
     print("  init_frag: release CRAM + own leftover SAT + invalidate vram")
 
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
-    if drop.count("spawn_frag") < 3 or ", 38)" not in drop:
+    if drop.count("spawn_frag(") != 3 or ", 38)" not in drop:
         return fail("red box death must fire 3× type 38 (caixinhas)")
     if "spr_set_sat_col" in drop:
         return fail("box_death_drop must not private-walk colour")

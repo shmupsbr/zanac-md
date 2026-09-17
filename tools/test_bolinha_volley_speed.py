@@ -88,7 +88,7 @@ def main() -> int:
     print("  4cf7 unit mag 128 * speed 3 = 1.5 px/frame cardinal")
 
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
-    if drop.count("spawn_frag") < 3 or ", 38)" not in drop:
+    if drop.count("spawn_frag(") != 3 or ", 38)" not in drop:
         return fail("red box still fires 3× type 38")
     print("  box×3: three type 38, speed 3 each")
 

@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
-"""#147 still colour-cycled box×3. NORMAL discs must be nibble 15 only.
+"""#148 still colour-cycled box×3. NORMAL discs sit on a LIVE pin.
 
-Filipe after #147 merge+rebuild (tip bd98d3d): a caixinha (type 4)
-bolinha still walked red → yellow → green. Two others existed; shot 7
-erased. BULLET VISIBILITY = NORMAL. Type 21 CRAM was already PAL2[3].
+Filipe after #148 merge+rebuild (tip a93e361): caixinha (type 4) shots
+still walked red → yellow → green under BULLET VISIBILITY = NORMAL.
+Early ground bolinhas (floor guns before boss 1) stayed white.
 
-Why #147 was still visible:
-  * SHOT_BANK_N=12 can miss a painted FRAME_LEAD index (full, or first
-    apply_vis uploading leftover crate/type21 as (oldframe,15)).
-  * leave_white only saw indices recorded in that bank.
-  * Type 21 spr_upload ignored prepare and DMA'd nibble 3 into the
-    untagged disc. fire7_paint_cram_tiles never left white (PAL2[13]).
-  * One of three discs sat on a walked nibble; the others stayed white.
+Why #148 was still visible:
+  * white_lock recorded a FRAME_LEAD index without a live sprite.
+  * keep_banked drops AUTO_VRAM; the last disc's SPR_releaseSprite
+    (or a later setVRAMTileIndex) VRAM_free's the span.
+  * Type 21 / fire 7 then occupy those tiles. Ground guns looked
+    white because nothing had stolen the index yet.
+  * Box×3 spawn during collide shared the dangling lock and skipped
+    DMA (white_lock_has_idx treated stolen tiles as proven white).
+  * leave_white only checked the base index, so a 4-tile bar at
+    lock-1 DMA'd across the disc.
 
 Nuclear lock this file FAILS unless:
-  * Dedicated never-evicted white VRAM lock (not the 12-slot bank).
-  * lead_white_buf + NORMAL upload keep_body so only nibble 15 remains.
-  * pal2_write refuses to walk PAL2[15] (restore-to-white only).
-  * fire7 / xor / type 21 leave locked white before DMA.
-  * init_frag detaches leftover SAT under NORMAL (box crate reuse).
-  * spr_set_sat_col does not upload a leftover non-bolinha frame.
+  * A hidden pin sprite holds FRAME_LEAD nibble-15 tiles all game.
+  * white_lock_add cannot retarget a pinned index.
+  * leave_white / type 21 skip check the 2x2 span, not just the base.
+  * spr_place / prepare share the pin (same path as ground guns).
+  * box_death_drop is exactly 3× type 38.
   * Type 21 still 8659s; HIGH discs still 8659; speed 3; no VDP_*Tiles.
 
 Usage (from zanac-md):
@@ -73,24 +75,38 @@ def main() -> int:
 
     if "WHITE_LOCK_N" not in ent or "s_white_lock" not in ent:
         return fail("never-evicted white VRAM lock missing")
-    add = fn_span(ent, "static void white_lock_add(u8 frame, u16 idx)") or ""
+    add = fn_span(ent, "static void white_lock_add(u8 frame, u16 idx, u8 ntiles, u8 pinned)") or ""
     has = fn_span(ent, "static int white_lock_has_idx(u16 idx)") or ""
     look = fn_span(ent, "static int white_lock_lookup(u8 frame, u16 *out)") or ""
+    ov = fn_span(ent, "static int white_lock_overlaps(u16 idx, u8 ntiles)") or ""
+    pin = fn_span(ent, "static int white_pin_ensure(u8 frame, u16 *out)") or ""
     if not add or not has or not look:
         return fail("white_lock add/has/lookup missing")
-    print("  white_lock: never-evicted (frame, index)")
+    if "pinned" not in add or "if (s_white_lock[i].pinned && !pinned)" not in add:
+        return fail("white_lock_add must not retarget a live pin index")
+    if not ov or "WHITE_SPAN" not in ov:
+        return fail("white_lock_overlaps must cover the 2x2 span (type 21 at lock-1)")
+    if not pin or "SPR_addSpriteEx" not in pin or "shot_vram_keep_banked" not in pin:
+        return fail("live white pin sprite missing (dangling #148 index)")
+    if "FRAME_LEAD" not in pin or "HIDDEN" not in pin:
+        return fail("pin must be a hidden FRAME_LEAD holder")
+    print("  white_lock: live pin sprite; span overlap; pin index sticky")
 
     leave = fn_span(ent, "static int shot_vram_leave_white(Sprite *sp, u8 nib)") or ""
-    if "white_lock_has_idx" not in leave:
-        return fail("leave_white must leave a locked white index (bank can miss)")
+    if "white_lock_overlaps" not in leave:
+        return fail("leave_white must leave the locked span (not just base index)")
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
     arm = prep.split("ebullet_normal_lock")[1][:900] if "ebullet_normal_lock" in prep else ""
+    if "white_pin_ensure" not in arm:
+        return fail("NORMAL prepare must share the live pin first (not a dangling lock)")
     if "white_lock_lookup" not in arm:
-        return fail("NORMAL prepare must share the locked white index first")
+        return fail("NORMAL prepare must share the locked white index")
+    if "shot_bank_lookup" not in arm or "shot_bank_painted_at" not in arm:
+        return fail("NORMAL prepare must still share a painted bank as fallback")
     if "white_lock_has_idx" not in prep:
         return fail("type 21 / HIGH prepare must refuse a locked white index")
     rem = fn_span(ent, "static void shot_vram_remember(Slot *s, u8 want, u8 ntiles, u8 painted)") or ""
-    if "white_lock_has_idx" not in rem or "LEAD_WHITE_NIB" not in rem:
+    if "white_lock_overlaps" not in rem or "LEAD_WHITE_NIB" not in rem:
         return fail("remember must not alias a cycling nibble onto locked white")
     print("  share: lock first; type 21 / fire cannot sit on it")
 
@@ -102,7 +118,9 @@ def main() -> int:
         return fail("NORMAL upload must keep_body nibble 15 only")
     if "white_lock_add" not in up:
         return fail("NORMAL paint_all-15 must lock the VRAM index")
-    print("  pixels: only nibble 15 (keep_body); index locked")
+    if "ebullet_cram_shot" not in up or "white_lock_overlaps" not in up:
+        return fail("type 21 matching skip must bust a stolen pin span")
+    print("  pixels: only nibble 15 (keep_body); index locked; type 21 leaves pin")
 
     pal = fn_span(ent, "static void pal2_write(u8 nib, u16 color)") or ""
     if not pal:
@@ -152,9 +170,8 @@ def main() -> int:
     lock_at = initf.find("ebullet_normal_lock")
     if det_at < 0 or lock_at < 0 or det_at < kind_at:
         return fail("init_frag must spr_detach leftover SAT after KIND_EBULLET under NORMAL")
-    if "ebullet_normal_lock(e) && e->spr" not in initf.replace(" ", "").replace("\n", ""):
-        if "ebullet_normal_lock(e) && e->spr" not in initf:
-            return fail("NORMAL box/gun/boss discs must drop leftover SAT")
+    if "ebullet_normal_lock(e)" not in initf or "spr_detach(e)" not in initf:
+        return fail("NORMAL box/gun/boss discs must drop leftover SAT")
     print("  init_frag: NORMAL detaches crate/type21 leftover SAT")
 
     setc = fn_span(ent, "static void spr_set_sat_col(Slot *s, u8 col)") or ""
@@ -163,8 +180,8 @@ def main() -> int:
     print("  spr_set_sat_col: upload only bolinha frames")
 
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
-    if drop.count(", 38)") < 3:
-        return fail("boxes still 3× type 38")
+    if drop.count("spawn_frag(") != 3 or drop.count(", 38)") != 3:
+        return fail("boxes still 3× type 38 (not 6)")
     if "spr_set_sat_col" in drop:
         return fail("box_death_drop must not private-walk colour")
     print("  box 4: 3× type 38 via init_frag")
@@ -195,9 +212,15 @@ def main() -> int:
         r"VDP_releaseTiles\s*\(", ent
     ):
         return fail("do not reintroduce VDP_allocateTiles/releaseTiles")
-    if "never-evicted" not in opth and "PAL2[15]" not in opth:
-        return fail("options.h must document locked white / PAL2[15]")
-    print("  KEEP: no VDP_*Tiles; type 21 ungated; no per-tick paint_all")
+    if "pin sprite" not in opth and "PAL2[15]" not in opth:
+        return fail("options.h must document the live white pin / PAL2[15]")
+    boot = fn_span(ent, "void entity_init(void)") or ""
+    if "white_pin_ensure" not in boot or "FRAME_LEAD" not in boot:
+        return fail("entity_init must hold FRAME_LEAD white for the session")
+    place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
+    if "white_pin_ensure" not in place:
+        return fail("spr_place must share the live pin under NORMAL")
+    print("  KEEP: live pin; no VDP_*Tiles; type 21 ungated; no per-tick paint_all")
 
     print("ok: NORMAL box bolinhas cannot show non-white pixels")
     return 0
