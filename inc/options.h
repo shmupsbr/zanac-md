@@ -85,9 +85,11 @@
  * sat_col 0x83 (TMS 3 light green) went purple (alias to nibble 12
  * + 0x8D magenta, and 8659 on PAL2[3]). HIGH / type 21 walk PAL2[5].
  * NORMAL FRAME_LEAD pixels are nibble 15 only (keep_body). PAL2[15]
- * and PAL2[3] are fixed white / light green. Locked white VRAM
- * indices are never-evicted; type 21 / HIGH / xor / fire 7 cannot
- * DMA onto them. Share the proven white bank; no per-tick rebuild.
+ * and PAL2[3] are fixed white / light green. A hidden pin sprite
+ * holds those tiles for the whole game (never-evicted live VRAM);
+ * type 21 / HIGH / xor / fire 7 cannot DMA onto that span. Every
+ * bolinha — ground guns, caixinha×3, bosses — shares the pin.
+ * No per-tick rebuild.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1

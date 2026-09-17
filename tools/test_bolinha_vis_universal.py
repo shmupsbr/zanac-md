@@ -259,6 +259,8 @@ def main() -> int:
     lock_arm = prep.split("ebullet_normal_lock")[1][:500] if "ebullet_normal_lock" in prep else ""
     if "shot_bank_lookup" not in lock_arm:
         return fail("NORMAL lock must share a remembered (FRAME_LEAD,15) bank")
+    if "white_pin_ensure" not in lock_arm:
+        return fail("NORMAL lock must share the live white pin (box×3)")
     if "return 0" not in lock_arm:
         return fail("NORMAL lock must return 0 on lookup miss (first paint_all)")
     if "painted" not in lock_arm and "shot_bank_painted_at" not in lock_arm:
@@ -343,7 +345,7 @@ def main() -> int:
 
     # Spawners of bolinhas: boxes 3x38, guns 21/38, base 21/42/43/45.
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)")
-    if not drop or drop.count("spawn_frag") < 3 or ", 38)" not in drop:
+    if not drop or drop.count("spawn_frag(") != 3 or ", 38)" not in drop:
         return fail("red-box death must still fire three type-38 bolinhas")
     if "spr_set_sat_col" in (drop or ""):
         return fail("box_death_drop must not colour-walk (init_frag owns vis)")
