@@ -359,17 +359,26 @@
  * #146 still had zero playtest effect: type 21 walked PAL2[4] while
  * SGDK-packed FRAME_LEAD pixels are nibble 4, and leave_white only
  * checked the *same frame* — a reused LIGHT_BAR sprite painted 4
- * into the shared white disc index. Dedicated CRAM, not 4, not 15. */
+ * into the shared white disc index. Dedicated CRAM, not 4, not 15.
+ *
+ * #147 still cycled box×3: the 12-slot shot bank missed a painted
+ * FRAME_LEAD index, leftover SAT was uploaded as (oldframe,15), and
+ * type 21 / fire 7 DMA'd a walked nibble into the untagged disc.
+ * NORMAL discs lock a never-evicted white VRAM index; pixels are
+ * nibble 15 only; PAL2[15] is not a walker. */
 #define LEAD_PACKED_NIB     4   /* SGDK FRAME_LEAD pixels; never 8659 */
-#define LEAD_WHITE_NIB     15   /* NORMAL Japan 0x8F bake */
+#define LEAD_WHITE_NIB     15   /* NORMAL Japan 0x8F bake; never walked */
 #define TYPE21_CRAM_NIB     3   /* type 21 / HIGH 8659; not packed 4 */
 #define LIGHTBAR_CRAM_NIB   TYPE21_CRAM_NIB
+#define XOR_CRAM_NIB        2   /* SIG/FLASH pool; not a bolinha nibble */
 /* C89 static asserts: type 21 must not walk lead packed/white/fire/XOR. */
 typedef char type21_cram_not_packed[(TYPE21_CRAM_NIB != LEAD_PACKED_NIB) ? 1 : -1];
 typedef char type21_cram_not_white[(TYPE21_CRAM_NIB != LEAD_WHITE_NIB) ? 1 : -1];
 typedef char type21_cram_not_fire[(TYPE21_CRAM_NIB != FIRE7_CRAM_NIB) ? 1 : -1];
-typedef char type21_cram_not_xor[(TYPE21_CRAM_NIB != 2) ? 1 : -1];
+typedef char type21_cram_not_xor[(TYPE21_CRAM_NIB != XOR_CRAM_NIB) ? 1 : -1];
 typedef char type21_cram_not_trans[(TYPE21_CRAM_NIB != 0) ? 1 : -1];
+typedef char fire7_cram_not_white[(FIRE7_CRAM_NIB != LEAD_WHITE_NIB) ? 1 : -1];
+typedef char xor_cram_not_white[(XOR_CRAM_NIB != LEAD_WHITE_NIB) ? 1 : -1];
 #define KIND_BOX        4
 #define KIND_DUSTER     10
 #define KIND_TERUZO     12
@@ -788,6 +797,17 @@ typedef struct {
 } ShotBank;
 static ShotBank s_shot_bank[SHOT_BANK_N];
 static u8 s_lead_white_ok;      /* RAM paint_all-15 FRAME_LEAD blit */
+/* Never-evicted NORMAL white VRAM. The 12-slot shot bank can miss a
+ * painted FRAME_LEAD index (full, leftover-frame tags). Type 21 /
+ * fire 7 then DMA a walked nibble into the untagged disc — box×3
+ * after #147. These slots are not reused for any other nibble. */
+#define WHITE_LOCK_N  6
+typedef struct {
+    u8  used;
+    u8  frame;
+    u16 index;
+} WhiteLock;
+static WhiteLock s_white_lock[WHITE_LOCK_N];
 
 static int shot_art_shareable(const Slot *s)
 {
@@ -844,6 +864,14 @@ static int ebullet_bolinha_high(const Slot *s)
 static int ebullet_normal_lock(const Slot *s)
 {
     return ebullet_bolinha(s) && !options_bullet_high();
+}
+
+/* FRAME_LEAD discs + type 45 bar/med. Leftover crate / type 21 SAT
+ * must not be uploaded as white under this name. */
+static int ebullet_white_frame(u8 fr)
+{
+    return (fr == FRAME_LEAD || fr == FRAME_MED_CIRCLE
+            || fr == FRAME_LIGHT_BAR);
 }
 
 /* Type 21 always TYPE21_CRAM_NIB 8659. HIGH bolinhas same. NORMAL
@@ -966,6 +994,59 @@ static int shot_vram_fresh_auto(Sprite *sp)
     return 1;
 }
 
+static void white_lock_reset(void)
+{
+    memset(s_white_lock, 0, sizeof(s_white_lock));
+}
+
+static void white_lock_add(u8 frame, u16 idx)
+{
+    u8 i;
+
+    for (i = 0; i < WHITE_LOCK_N; i++)
+    {
+        if (s_white_lock[i].used && s_white_lock[i].frame == frame)
+        {
+            s_white_lock[i].index = idx;
+            return;
+        }
+    }
+    for (i = 0; i < WHITE_LOCK_N; i++)
+    {
+        if (s_white_lock[i].used)
+            continue;
+        s_white_lock[i].used = 1;
+        s_white_lock[i].frame = frame;
+        s_white_lock[i].index = idx;
+        return;
+    }
+}
+
+static int white_lock_has_idx(u16 idx)
+{
+    u8 i;
+
+    for (i = 0; i < WHITE_LOCK_N; i++)
+        if (s_white_lock[i].used && s_white_lock[i].index == idx)
+            return 1;
+    return 0;
+}
+
+static int white_lock_lookup(u8 frame, u16 *out)
+{
+    u8 i;
+
+    for (i = 0; i < WHITE_LOCK_N; i++)
+    {
+        if (s_white_lock[i].used && s_white_lock[i].frame == frame)
+        {
+            *out = s_white_lock[i].index;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void shot_vram_reset(void)
 {
     /* SPR_reset (game_boot / go_title) rebuilds the sprite VRAM region.
@@ -973,6 +1054,7 @@ static void shot_vram_reset(void)
      * VRAM_free; do not invent VDP_releaseTiles. */
     memset(s_shot_bank, 0, sizeof(s_shot_bank));
     s_lead_white_ok = 0;
+    white_lock_reset();
 }
 
 /* Proven paint_all-15: every nonzero body nibble is white. A (frame,15)
@@ -986,6 +1068,8 @@ static int shot_vram_white_proven(const Slot *s, u8 want)
     if (!s->spr || want != 15)
         return 0;
     idx = (u16)(s->spr->attribut & TILE_INDEX_MASK);
+    if (white_lock_has_idx(idx))
+        return 1;
     for (i = 0; i < SHOT_BANK_N; i++)
     {
         if (s_shot_bank[i].used && s_shot_bank[i].painted
@@ -1052,7 +1136,8 @@ static int shot_vram_leave_white(Sprite *sp, u8 nib)
     if (!sp || nib == LEAD_WHITE_NIB)
         return 1;
     cur = (u16)(sp->attribut & TILE_INDEX_MASK);
-    if (!shot_bank_index_is_white(cur) && !shot_bank_index_is_lead(cur))
+    if (!white_lock_has_idx(cur)
+        && !shot_bank_index_is_white(cur) && !shot_bank_index_is_lead(cur))
         return 1;
     return shot_vram_fresh_auto(sp);
 }
@@ -1065,6 +1150,9 @@ static void shot_vram_remember(Slot *s, u8 want, u8 ntiles, u8 painted)
     if (!s->spr || !ntiles || !shot_vram_cacheable(s, want))
         return;
     cur = (u16)(s->spr->attribut & TILE_INDEX_MASK);
+    /* Do not alias a cycling nibble onto locked white tiles. */
+    if (want != LEAD_WHITE_NIB && white_lock_has_idx(cur))
+        return;
     for (i = 0; i < SHOT_BANK_N; i++)
     {
         if (!s_shot_bank[i].used || s_shot_bank[i].frame != s->frame
@@ -1117,8 +1205,11 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
      * any white or FRAME_LEAD index. Lookup miss still paints. */
     if (ebullet_normal_lock(s))
     {
-        if (want == LEAD_WHITE_NIB && shot_bank_lookup(s->frame, want, &idx)
-            && shot_bank_painted_at(s->frame, LEAD_WHITE_NIB, idx))
+        /* Lock first: shot bank can miss leftover-frame 15 tags. */
+        if (want == LEAD_WHITE_NIB
+            && (white_lock_lookup(s->frame, &idx)
+                || (shot_bank_lookup(s->frame, want, &idx)
+                    && shot_bank_painted_at(s->frame, LEAD_WHITE_NIB, idx))))
         {
             shot_vram_point(s->spr, idx);
             s->vram_fr = s->frame;
@@ -1131,7 +1222,8 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
     {
         /* Type 21 / HIGH must not retarget onto a white or lead bank. */
         if (want != LEAD_WHITE_NIB
-            && (shot_bank_index_is_white(idx) || shot_bank_index_is_lead(idx)))
+            && (white_lock_has_idx(idx)
+                || shot_bank_index_is_white(idx) || shot_bank_index_is_lead(idx)))
             return 0;
         shot_vram_point(s->spr, idx);
         s->vram_fr = s->frame;
@@ -1807,6 +1899,7 @@ static const u8 *lead_white_buf(const u8 *src, u16 nbytes)
         if (nbytes > REMAP_TILE_BYTES)
             nbytes = REMAP_TILE_BYTES;
         orb_paint_body_nibbles((u8 *)s_lead_white, src, nbytes, LEAD_WHITE_NIB);
+        orb_keep_body_nibbles((u8 *)s_lead_white, nbytes, LEAD_WHITE_NIB);
         s_lead_white_ok = 1;
     }
     return (const u8 *)s_lead_white;
@@ -1976,7 +2069,8 @@ static void spr_upload_color(Slot *s)
          * FRAME_LEAD while 8659 walks a different slot — #146. paint_all
          * onto 15 isolates the white lock; onto TYPE21_CRAM_NIB enables
          * the HIGH walk. Type 21 never shares that 15 bank. */
-        u8 paint_bar = (u8)(ebullet_bolinha(s) || ebullet_normal_lock(s));
+        u8 paint_bar = (u8)(ebullet_bolinha(s) || ebullet_normal_lock(s)
+                            || ebullet_cram_shot(s));
         u8 painted = (u8)(disc || paint_bar);
         u8 lead_white = (u8)(ebullet_normal_lock(s)
                              && s->frame == FRAME_LEAD
@@ -2017,12 +2111,26 @@ static void spr_upload_color(Slot *s)
                 orb_keep_body_nibbles(s_disc, nq, want);
                 DMA_queueDma(DMA_VRAM, s_disc, vaddr, (u16)(nq / 2), 2);
             }
+            else if (ebullet_normal_lock(s) && want == LEAD_WHITE_NIB)
+            {
+                static u8 s_white_only[REMAP_TILE_BYTES];
+
+                memcpy(s_white_only, cached, nq);
+                orb_keep_body_nibbles(s_white_only, nq, LEAD_WHITE_NIB);
+                DMA_queueDma(DMA_VRAM, s_white_only, vaddr,
+                             (u16)(nq / 2), 2);
+                white_lock_add(s->frame,
+                               (u16)(sp->attribut & TILE_INDEX_MASK));
+            }
             else
                 DMA_queueDma(DMA_VRAM, (void *)cached, vaddr,
                              (u16)(nq / 2), 2);
         }
         s->vram_fr = s->frame;
         s->vram_nib = want;
+        if (ebullet_normal_lock(s) && want == LEAD_WHITE_NIB)
+            white_lock_add(s->frame,
+                           (u16)(sp->attribut & TILE_INDEX_MASK));
         shot_vram_remember(s, want, (u8)ts->numTile, painted);
         shot_vram_own(sp);
     }
@@ -2056,7 +2164,10 @@ static void spr_set_sat_col(Slot *s, u8 col)
         if (s->sat_col != 0x8F || s->vram_nib != 15 || had_cram)
             s->vram_fr = 0xFF;
         s->sat_col = 0x8F;
-        if (s->spr && s->spr->frame)
+        /* Do not upload leftover crate / type21 / flyer tiles as
+         * (oldframe, 15) — that filled the 12-slot bank and left
+         * FRAME_LEAD untagged so type 21 DMA'd nibble 3 into it. */
+        if (s->spr && s->spr->frame && ebullet_white_frame(s->frame))
         {
             spr_upload_color(s);
             shot_vram_own(s->spr);
@@ -2134,8 +2245,19 @@ static void spr_place(Slot *s, u16 frame)
         if (shot_art_shareable(s) && proj_draw_hidden(s))
             return;
         want = proj_tile_want(s);
-        share = (u8)(shot_art_shareable(s)
-                     && shot_bank_lookup((u8)frame, want, &bank_idx));
+        share = 0;
+        if (shot_art_shareable(s))
+        {
+            /* NORMAL discs share only the never-evicted white lock.
+             * A (FRAME_LEAD,15) shot-bank hit can be leftover-frame
+             * paint or an unpainted packed-4 tag. */
+            if (ebullet_normal_lock(s) && want == LEAD_WHITE_NIB
+                && white_lock_lookup((u8)frame, &bank_idx))
+                share = 1;
+            else if (!ebullet_normal_lock(s)
+                     && shot_bank_lookup((u8)frame, want, &bank_idx))
+                share = 1;
+        }
         s->spr = SPR_addSpriteEx(&spr_objs, mode_draw_x(s->x, s->sat_col),
                                  slot_draw_y(s),
                                  TILE_ATTR(PAL2, FALSE, FALSE, FALSE),
@@ -4446,6 +4568,12 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     e->vram_nib = 0xFF;
     e->x = x;
     e->y = y;
+    /* Leftover crate / type 21 / flyer SAT cannot ride a NORMAL
+     * disc: first apply_vis used to paint the OLD frame as (fr,15)
+     * and fill the 12-slot bank. Fresh sprite; share the locked
+     * white FRAME_LEAD index. HIGH keeps leftover SAT (cycle). */
+    if (ebullet_normal_lock(e) && e->spr)
+        spr_detach(e);
     apply_dir(e, dir);
     if (variant == 20)
     {
@@ -7363,11 +7491,25 @@ static const u16 k_tms_vdp[16] = {
     RGB24_TO_VDPCOLOR(TMS_GAME_RGB_15)
 };
 
+/* PAL2[15] is NORMAL disc white. 8659 / xor / fire 7 must never walk
+ * it — a write of any other TMS colour would cycle every locked
+ * FRAME_LEAD pixel. Restore-to-white is the only allowed store. */
+static void pal2_write(u8 nib, u16 color)
+{
+    if ((u8)(nib & 0x0F) == LEAD_WHITE_NIB)
+    {
+        PAL_setColor((u16)((PAL2 * 16) + LEAD_WHITE_NIB),
+                     k_tms_vdp[LEAD_WHITE_NIB]);
+        return;
+    }
+    PAL_setColor((u16)((PAL2 * 16) + (nib & 0x0F)), color);
+}
+
 static void fire7_cram_restore(void)
 {
     if (!s_fire7_cram)
         return;
-    PAL_setColor((u16)((PAL2 * 16) + FIRE7_CRAM_NIB), k_tms_vdp[FIRE7_CRAM_NIB]);
+    pal2_write(FIRE7_CRAM_NIB, k_tms_vdp[FIRE7_CRAM_NIB]);
     s_fire7_cram = 0;
     s_fire7_col = 0;
 }
@@ -7388,6 +7530,10 @@ static void fire7_paint_cram_tiles(Slot *f)
         return;
     ts = sp->frame->tileset;
     if (!ts || !ts->numTile)
+        return;
+    /* Shot 7 INC-walks PAL2[13]. Do not DMA comet tiles into a
+     * locked NORMAL disc index (Filipe's box×3 + fire 7 playtest). */
+    if (!shot_vram_leave_white(sp, want))
         return;
     nbytes = (u16)(ts->numTile * 32);
     vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);
@@ -7417,8 +7563,7 @@ static void fire7_bind_cram(Slot *f)
     s_fire7_col = 0x81;
     f->sat_col = (u8)(0x80 | FIRE7_CRAM_NIB);
     fire7_paint_cram_tiles(f);
-    PAL_setColor((u16)((PAL2 * 16) + FIRE7_CRAM_NIB),
-                 k_tms_vdp[s_fire7_col & 0x0F]);
+    pal2_write(FIRE7_CRAM_NIB, k_tms_vdp[s_fire7_col & 0x0F]);
     s_fire7_cram = 1;
 }
 
@@ -7428,8 +7573,7 @@ static void fire7_cycle_cram(Slot *f)
      * tiles stay on nibble 13 so this CRAM write is what the player sees. */
     (void)f;
     s_fire7_col = (u8)((s_fire7_col + 1) & 0x8F);
-    PAL_setColor((u16)((PAL2 * 16) + FIRE7_CRAM_NIB),
-                 k_tms_vdp[s_fire7_col & 0x0F]);
+    pal2_write(FIRE7_CRAM_NIB, k_tms_vdp[s_fire7_col & 0x0F]);
 }
 
 /* XOR CRAM pool must not collide with solid / SAT-XOR enemy remaps.
@@ -7465,8 +7609,7 @@ static void xor_cram_release(Slot *s)
         if (s_bar_cram_refs)
             s_bar_cram_refs--;
         if (!s_bar_cram_refs)
-            PAL_setColor((u16)((PAL2 * 16) + LIGHTBAR_CRAM_NIB),
-                         k_tms_vdp[LIGHTBAR_CRAM_NIB]);
+            pal2_write(LIGHTBAR_CRAM_NIB, k_tms_vdp[LIGHTBAR_CRAM_NIB]);
         s->cram_nib = 0;
         s->cram_col = 0;
         return;
@@ -7475,8 +7618,7 @@ static void xor_cram_release(Slot *s)
         s_xor_cram_refs--;
     if (!s_xor_cram_refs)
     {
-        PAL_setColor((u16)((PAL2 * 16) + s->cram_nib),
-                     k_tms_vdp[s->cram_nib]);
+        pal2_write(s->cram_nib, k_tms_vdp[s->cram_nib]);
         s_xor_cram_kind = 0;
     }
     s->cram_nib = 0;
@@ -7517,8 +7659,7 @@ static u8 sat_col_tile_nibble(const Slot *s, u8 want)
         return s->cram_nib;
     if (want == FIRE7_CRAM_NIB && s->kind != KIND_FIRE)
     {
-        PAL_setColor((u16)((PAL2 * 16) + NIB_8D_ALIAS),
-                     k_tms_vdp[13]);
+        pal2_write(NIB_8D_ALIAS, k_tms_vdp[13]);
         return NIB_8D_ALIAS;
     }
     if ((want == TYPE21_CRAM_NIB || want == LEAD_PACKED_NIB)
@@ -7620,7 +7761,7 @@ static int xor_cram_bind(Slot *s, u8 col)
         s->sat_col = col;
         if (s->spr && s->spr->frame)
             xor_cram_paint(s, nib);
-        PAL_setColor((u16)((PAL2 * 16) + nib), k_tms_vdp[col & 0x0F]);
+        pal2_write(nib, k_tms_vdp[col & 0x0F]);
         return 1;
     }
     if (!s->spr || !s->spr->frame)
@@ -7632,7 +7773,7 @@ static int xor_cram_bind(Slot *s, u8 col)
     s->cram_col = col;
     s->sat_col = col;
     xor_cram_paint(s, nib);
-    PAL_setColor((u16)((PAL2 * 16) + nib), k_tms_vdp[col & 0x0F]);
+    pal2_write(nib, k_tms_vdp[col & 0x0F]);
     return 1;
 }
 
@@ -7645,8 +7786,7 @@ static void xor_cram_cycle(Slot *s, u8 col)
         return;
     s->cram_col = col;
     s->sat_col = col;
-    PAL_setColor((u16)((PAL2 * 16) + s->cram_nib),
-                 k_tms_vdp[col & 0x0F]);
+    pal2_write(s->cram_nib, k_tms_vdp[col & 0x0F]);
 }
 
 void entity_init(void)
@@ -7696,6 +7836,8 @@ void entity_init(void)
      * Load the WebMSX / V9938-default table (not the PNG bake and not
      * title_md_palette): Lord-Nightmare RGB24 collapsed TMS 2 and 12. */
     PAL_setPalette(PAL2, k_tms_vdp, CPU);
+    pal2_write(LEAD_WHITE_NIB, k_tms_vdp[LEAD_WHITE_NIB]);
+    white_lock_reset();
     /* PAL2[2] and PAL2[3] used to be overridden to half brightness so the
      * flyers would read against the map. That was compensation for a palette
      * bug, not fidelity: the old RGB24 pair collapsed TMS 2 and TMS 12 onto

@@ -133,9 +133,9 @@ def main() -> int:
         return fail("xor_cram_cycle not found")
     if "spr_upload_color" in cyc or "remap_cache_get" in cyc:
         return fail("cycle must not remap tiles")
-    if "PAL_setColor" not in cyc:
+    if "PAL_setColor" not in cyc and "pal2_write" not in cyc:
         return fail("cycle is a CRAM write")
-    print("  xor_cram_cycle: PAL_setColor only")
+    print("  xor_cram_cycle: CRAM write (pal2_write locks PAL2[15])")
 
     rel = fn_span(ent, "static void spr_detach(Slot *s)")
     if not rel or "xor_cram_release" not in rel:

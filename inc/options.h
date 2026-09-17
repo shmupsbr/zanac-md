@@ -83,9 +83,16 @@
  * Type 21 CRAM is a dedicated nibble, not SGDK-packed FRAME_LEAD 4
  * and not white 15: #146 still walked PAL2[4] while discs sat on
  * packed 4 (leave_white keyed the wrong frame on slot reuse).
- * NORMAL never shares FRAME_LEAD with any bank type 21 can touch.
- * DMA white discs from a RAM paint_all-15 cache (one blit, not a
- * per-pixel rebuild). Share that proven bank; no per-tick rebuild.
+ * #147 isolated type 21 onto PAL2[3] and DMA'd white from a RAM
+ * paint_all-15 cache. Filipe after that rebuild: box×3 still cycled
+ * (red/yellow/green). The 12-slot shot bank can fail to tag a painted
+ * FRAME_LEAD index; leftover crate/type21 SAT then gets first
+ * apply_vis painted as (oldframe,15), type 21 / fire 7 DMA a walked
+ * nibble into the untagged disc, and one of the three cycles.
+ * NORMAL FRAME_LEAD pixels are nibble 15 only (keep_body). PAL2[15]
+ * is fixed white — no PAL_setColor walk. Locked white VRAM indices
+ * are never-evicted and type 21 / HIGH / xor / fire 7 cannot DMA
+ * onto them. Share the proven white bank; no per-tick rebuild.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1
