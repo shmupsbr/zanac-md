@@ -108,8 +108,10 @@ def main() -> int:
         return fail("type 21 8659 random colour must CRAM")
     if "LIGHTBAR_CRAM_NIB" not in ent:
         return fail("type 21 must own a dedicated CRAM nibble (not XOR pool 2)")
-    if not re.search(r"TYPE21_CRAM_NIB\s+3", ent):
-        return fail("type 21 CRAM must be dedicated nibble 3 (not packed lead 4)")
+    if re.search(r"TYPE21_CRAM_NIB\s+3\b", ent):
+        return fail("type 21 CRAM must not be flyer green 3")
+    if not re.search(r"TYPE21_CRAM_NIB\s+5", ent):
+        return fail("type 21 CRAM must be dedicated nibble 5")
     if re.search(r"#define\s+LIGHTBAR_CRAM_NIB\s+4\b", ent):
         return fail("type 21 must not walk SGDK-packed FRAME_LEAD nibble 4")
     alloc = fn_span(ent, "static u8 xor_cram_alloc(const Slot *s)")
@@ -133,9 +135,9 @@ def main() -> int:
         return fail("xor_cram_cycle not found")
     if "spr_upload_color" in cyc or "remap_cache_get" in cyc:
         return fail("cycle must not remap tiles")
-    if "PAL_setColor" not in cyc:
+    if "PAL_setColor" not in cyc and "pal2_write" not in cyc:
         return fail("cycle is a CRAM write")
-    print("  xor_cram_cycle: PAL_setColor only")
+    print("  xor_cram_cycle: CRAM write (pal2_write locks PAL2[15])")
 
     rel = fn_span(ent, "static void spr_detach(Slot *s)")
     if not rel or "xor_cram_release" not in rel:
