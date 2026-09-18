@@ -235,8 +235,7 @@
  *           4898 u8 wrap-cull Y>=0xD0 / X>=0xD1 (no s32 X).
  *   37      lead_bullet 84dd/84e3: +0c=3 +17=3 Japan, player_pos_snapshot 4c8b
  *           (= aim_4c91 + set_velocity_from_dir 8.8). Port: LEAD_MD_SPEED
- *           (5; 2.5 px/f). #154 was 3; +50% of 3 is 4.5, integer 4 is
- *           only +33%, so 5 is the closest integer ≥ +50%.
+ *           (4; 2.0 px/f). #155 was 5 (2.5 px/f).
  *           84f6 SET 7 / 84fa RET (no 4898). Armed 84fb CALL 4898 / 44a6.
  *           Port: dest/bind/script/timer; apply_dir_88; skip first step;
  *           then 4898 u8 Y>=0xD0/X>=0xD1.
@@ -258,9 +257,9 @@
  *           Child of guns 46-55 / type 85-86. Not in spawn_type_list 0xBECC;
  *           stream path (is_port_type) uses 71c5 + leftover +0x1a=0.
  *   38      burst_fragment 8507: Japan +0x17=3, dir=+0x1a&0x0F, set_vel 8.8
- *           (42/43 path sans XOR). Port: LEAD_MD_SPEED 5 (2.5 px/f; closest
- *           integer ≥ +50% of #154's 3). 8520 SET 7 / 8524 RET (no 4898).
- *           Armed JR 84fb. Port: skip first step; then 4898 u8 wrap-cull.
+ *           (42/43 path sans XOR). Port: LEAD_MD_SPEED 4 (2.0 px/f).
+ *           8520 SET 7 / 8524 RET (no 4898). Armed JR 84fb.
+ *           Port: skip first step; then 4898 u8 wrap-cull.
  *   41      pair_fragment 852f: child of umber-8 / swoop-29. Not in 0xBECC.
  *           Init 4cf7 speed 2, LDIR +08..+0b -> +1c..+1f, +17=4, RET 857e
  *           (no 857f, no 4898). 857f: heading +/-1 every 2f, 4cf7 speed 4,
@@ -364,18 +363,17 @@
  * sat_col, or colour rules. Type 21 stays on its own pat-6 tiles.
  *
  * #152 multiplex (one pin DMA; later discs only point) removed the
- * per-shot AUTO_VRAM/paint hitch. #154 set LEAD_MD_SPEED 3 (1.5 px/f).
- * Filipe: +50%. Integer 4 is only +33%; LEAD_MD_SPEED 5 = 2.5 px/f
- * (closest integer ≥ +50%). Appearance is locked: do not change
+ * per-shot AUTO_VRAM/paint hitch. #155 set LEAD_MD_SPEED 5 (2.5 px/f).
+ * Filipe: 4 (2.0 px/f cardinal). Appearance is locked: do not change
  * FRAME_LEAD art, nibble paint, sat_col, or colour rules. Type 21 /
  * fire 7 must not DMA onto the pin span. */
 #define LEAD_PACKED_NIB     4   /* SGDK FRAME_LEAD pixels; never 8659 */
 #define LEAD_WHITE_NIB     15   /* NORMAL Japan 0x8F bake; never walked */
-/* Japan 8507 +17=3 → 128*3 = 1.5 px/f cardinal. #154 used 3 → 1.5 px/f;
- * +50% of 3 is 4.5; closest integer ≥ +50% is 5 → 2.5 px/f. Type 21
- * stays 4; type 45 stays (R&1)+2; type 41 keeps 2+4. */
-#define LEAD_MD_SPEED       5
-typedef char lead_md_speed_is_5[(LEAD_MD_SPEED == 5) ? 1 : -1];
+/* Japan 8507 +17=3 → 128*3 = 1.5 px/f cardinal. #155 used 5 → 2.5 px/f;
+ * now 4 → 2.0 px/f. Type 21 stays Japan 4; type 45 stays (R&1)+2;
+ * type 41 keeps 2+4. */
+#define LEAD_MD_SPEED       4
+typedef char lead_md_speed_is_4[(LEAD_MD_SPEED == 4) ? 1 : -1];
 typedef char lead_md_under_player_c2[(LEAD_MD_SPEED < 24) ? 1 : -1];
 #define FLYER_GREEN_NIB     3   /* type 44 / veybar 22/23 sat_col 0x83 */
 #define TYPE21_CRAM_NIB     5   /* type 21 / HIGH 8659; not flyer 3 */
@@ -4798,7 +4796,7 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     {
         /* handler_type37 84e3: Japan +0x17=3; player_pos_snapshot 4c8b
          * (= aim_4c91 then set_velocity_from_dir). Port: LEAD_MD_SPEED
-         * (5; 2.5 px/f, closest integer ≥ +50% of #154's 3). No XOR.
+         * (4; 2.0 px/f). No XOR.
          * Type 42 CALL 84e3 then XOR — keep apply_dir_88_xor below. */
         apply_dir_88(e, aim_4c91(x, y), LEAD_MD_SPEED);
     }
@@ -4836,7 +4834,7 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     {
         /* handler_type38_burst_fragment 0x8507:
          * Japan +0x17=3; dir=+0x1a&0x0F; set_velocity_from_dir (8.8).
-         * Port: LEAD_MD_SPEED 5 (2.5 px/f cardinal; ≥ +50% of #154). */
+         * Port: LEAD_MD_SPEED 4 (2.0 px/f cardinal). */
         apply_dir_88(e, dir, LEAD_MD_SPEED);
     }
     else if (variant == 21)

@@ -178,11 +178,11 @@ def main() -> int:
     if "apply_dir_88(e, dir, LEAD_MD_SPEED)" not in arm38:
         return fail("type 38 must use LEAD_MD_SPEED")
     spd = re.search(r"#define\s+LEAD_MD_SPEED\s+(\d+)", ent)
-    if not spd or int(spd.group(1)) != 5:
-        return fail("LEAD_MD_SPEED must be 5 (closest integer ≥ +50% of #154's 3)")
+    if not spd or int(spd.group(1)) != 4:
+        return fail("LEAD_MD_SPEED must be 4")
     if "ebullet_normal_lock(e)" not in initf or "spr_detach(e)" not in initf:
         return fail("NORMAL must drop leftover crate SAT before place")
-    print("  speed: type 38 = LEAD_MD_SPEED 5; leftover SAT detached")
+    print("  speed: type 38 = LEAD_MD_SPEED 4; leftover SAT detached")
 
     if re.search(r"VDP_allocateTiles\s*\(", ent) or re.search(
         r"VDP_releaseTiles\s*\(", ent
