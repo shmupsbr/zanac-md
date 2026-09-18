@@ -176,7 +176,7 @@ def main() -> int:
     ) or ""
     arm38 = initf.split("variant == 38")[1][:400] if "variant == 38" in initf else ""
     if "apply_dir_88(e, dir, LEAD_MD_SPEED)" not in arm38:
-        return fail("type 38 must use LEAD_MD_SPEED (MD feel, not Japan 3)")
+        return fail("type 38 must use LEAD_MD_SPEED")
     if "ebullet_normal_lock(e)" not in initf or "spr_detach(e)" not in initf:
         return fail("NORMAL must drop leftover crate SAT before place")
     print("  speed: type 38 = LEAD_MD_SPEED; leftover SAT detached")
