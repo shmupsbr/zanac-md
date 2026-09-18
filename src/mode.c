@@ -8,6 +8,16 @@ static const ModeAssets *s_cur;
 
 #define LETTER_TILE     TILE_USER_INDEX
 
+#if MODE_MD_PF_COLS != MODE_MSX_PF_COLS
+#error Zanac MD nametable is 1:1 - do not dup 24 to 30 columns
+#endif
+#if (MODE_MD_X0 + MODE_MD_PF_COLS + MODE_MD_X0) != MODE_H40_COLS
+#error Zanac MD playfield must be centered in H40 (8+24+8)
+#endif
+#if MODE_PLANE_COLS != 64
+#error H40 needs a 64-wide plane so cols 32-39 do not wrap onto 0-7
+#endif
+
 static void load_letter_tile(void)
 {
     /* Color 1 = black (color 0 is always transparent on MD). */
@@ -139,19 +149,15 @@ u16 mode_map_cols(void)
 
 void mode_map_dest_cols(u8 msx_col, u8 *x0, u8 *n)
 {
-    u8 a;
-    u8 b;
-
+    /* 1:1, centered. 24→30 (n=1 or 2) duplicated whole columns. */
     if (msx_col >= MODE_MSX_PF_COLS)
     {
-        *x0 = MODE_MD_PF_COLS;
+        *x0 = (u8)(MODE_MD_X0 + MODE_MD_PF_COLS);
         *n = 0;
         return;
     }
-    a = (u8)((u16)msx_col * MODE_MD_PF_COLS / MODE_MSX_PF_COLS);
-    b = (u8)((u16)(msx_col + 1) * MODE_MD_PF_COLS / MODE_MSX_PF_COLS);
-    *x0 = a;
-    *n = (u8)(b - a);
+    *x0 = (u8)(MODE_MD_X0 + msx_col);
+    *n = 1;
 }
 
 void mode_apply_video(void)
@@ -171,9 +177,12 @@ void mode_apply_video(void)
     else
     {
         VDP_setWindowOff();
+        /* H40 + 32-wide plane wraps cols 32-39 onto 0-7: leftover fills
+         * punch the left map and the right 8 columns repeat it. */
+        VDP_setPlaneSize(64, 32, TRUE);
         VDP_setScreenWidth320();
-        /* Same PAL0 black tile Original uses for wrap/HUD backing, so
-         * unused H40 cols 30-39 and NT 24-31 cannot keep title garbage. */
+        /* PAL0 black still exists for Original letterbox if we return
+         * to title / Enhanced. MD gutters use sky 0x28, not this tile. */
         load_letter_tile();
     }
 }

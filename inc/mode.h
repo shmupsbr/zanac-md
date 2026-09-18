@@ -60,9 +60,9 @@ u16  mode_text_row(u16 msx_row);
 u16  mode_camera_off(u16 scroll_px);
 /* Screen Y of SAT 0 / playfield top. Original 16, Zanac MD 0. */
 u16  mode_playfield_top(void);
-/* Visible map columns written to BG_B. Original 24, Zanac MD 30. */
+/* Visible map columns written to BG_B. Both modes: 24 (MD is 1:1). */
 u16  mode_map_cols(void);
-/* MSX playfield col 0..23 → H40 dest [x0, x0+n). n is 1 or 2. */
+/* MSX playfield col 0..23 → H40 dest [x0, x0+n). MD: x0=8+col, n=1. */
 void mode_map_dest_cols(u8 msx_col, u8 *x0, u8 *n);
 
 /* PAL0 priority black tile used by BG_A letterbox and BG_B unused wrap rows. */
