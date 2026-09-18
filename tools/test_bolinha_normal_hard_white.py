@@ -102,10 +102,10 @@ def main() -> int:
 
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
     if "ebullet_lead_disc" not in prep or "lead7_pin_ensure" not in prep:
-        return fail("shot_vram_prepare must share only the Japan pat 7 pin")
+        return fail("shot_vram_prepare must share only the FRAME_LEAD pin")
     if "return 0" not in prep:
         return fail("prepare miss must still encode/paint")
-    print("  shot_vram_prepare: Japan pat 7 pin; type 45 NORMAL does not share type 21")
+    print("  shot_vram_prepare: FRAME_LEAD pin; type 45 NORMAL does not share type 21")
 
     place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
     if re.search(

@@ -87,10 +87,10 @@ def main() -> int:
 
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
     if "lead7_pin_ensure" not in prep:
-        return fail("NORMAL 3+ discs must share the Japan pat 7 pin")
+        return fail("NORMAL 3+ discs must share the FRAME_LEAD pin")
     if "ebullet_normal_lock" not in prep or "return 0" not in prep:
         return fail("type 45 NORMAL / pin miss must still encode")
-    print("  shot_vram_prepare: Japan pat 7 pin; type 45 isolated")
+    print("  shot_vram_prepare: FRAME_LEAD pin; type 45 isolated")
 
     up = fn_span(ent, "static void spr_upload_color(Slot *s)") or ""
     skip = re.search(

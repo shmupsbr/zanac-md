@@ -82,14 +82,15 @@
  * (`<===>`) is Japan 8659 always — it does not enter this switch.
  * Type 21 CRAM is a dedicated nibble, not SGDK-packed FRAME_LEAD 4,
  * not white 15, and not flyer green 3. HIGH / type 21 walk PAL2[5].
- * Lead discs (20/37/38/41/42/43) are Japan SAT 0x1C / gfx pat 7
- * (zanac-re 84eb/8513/8539/8672 +04=0x8F). SGDK FRAME_LEAD is an
- * 8x8 UL shard of that 16x16 disc — MD draws the full pat 7 into a
- * 16x16 vehicle. NORMAL bakes nibble 15 (TMS white); HIGH bakes
- * TYPE21_CRAM_NIB and 8659-walks PAL2[5]. Type 21 keeps pat 6
- * (`<===>`) on its own tiles. PAL2[15] and PAL2[3] stay fixed.
- * Every lead disc shares the Japan pat 7 pin (no per-tick DMA).
- * No VDP_allocateTiles. No per-tick rebuild.
+ * Lead discs (20/37/38/41/42/43) stay on the small FRAME_LEAD
+ * bolinha (objs.png ~14 px disc / SGDK 8x8). SAT name is still
+ * 0x1C. Do not encode Japan gfx pat 7 into a 16x16 FRAME_CIRCLE
+ * vehicle — that is ship-sized and rejected in playtest. NORMAL
+ * paint_all-15 + keep_body 15; HIGH paint_all TYPE21_CRAM_NIB and
+ * 8659-walks PAL2[5]. Type 21 keeps pat 6 (`<===>`) on its own
+ * tiles. PAL2[15] and PAL2[3] stay fixed. Every lead disc shares
+ * the exclusive FRAME_LEAD pin (no per-tick DMA). No VDP_allocateTiles.
+ * No per-tick rebuild.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1
