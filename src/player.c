@@ -78,20 +78,11 @@ static const u32 k_award[21] = {
 
 static void place_start(void)
 {
-    /* 0x75E3 SAT X = 0x78, 0x75DF SAT Y = 0xA0. MD mode keeps a centered
-     * visual spawn on the wider playfield (no EC). */
-    if (mode_get() == MODE_ORIGINAL)
-    {
-        s_x = 0x78;
-        s_y = 0xA0;
-    }
-    else
-    {
-        const ModeAssets *a = mode_assets();
-
-        s_x = (s16)((a->playfield_w - SHIP_W) / 2);
-        s_y = (s16)(a->playfield_h - SHIP_H - 16);
-    }
+    /* 0x75E3 SAT X = 0x78, 0x75DF SAT Y = 0xA0. Both modes keep MSX SAT;
+     * ZANAC MD draws at mode_draw_x/y so the hull sits in the same
+     * relative H40 place (EC then *320/256). */
+    s_x = 0x78;
+    s_y = 0xA0;
     s_xfrac = 0;
     s_yfrac = 0;
     s_sat_col = 0x8F;
@@ -698,7 +689,6 @@ void player_add_clear_bonus(u8 award_idx)
 
 void player_update(void)
 {
-    const ModeAssets *a = mode_assets();
     u16 joy;
     s16 vx;
     s16 vy;
@@ -767,21 +757,12 @@ void player_update(void)
     s_xvel_sel = sel;
 
     /* MSX player_ship_update 0x7612: X clamp 0x28..0xC8, Y 0x1E..0xB8.
-     * Those are SAT coordinates. Original EC draw keeps the sprite in 0-191. */
-    if (mode_get() == MODE_ORIGINAL)
-    {
-        min_x = MODE_SHIP_MIN_X;
-        min_y = 0x1E;
-        max_x = MODE_SHIP_MAX_X;
-        max_y = 0xB8;
-    }
-    else
-    {
-        min_x = 0;
-        min_y = 0;
-        max_x = (s16)(a->playfield_w - SHIP_W);
-        max_y = (s16)(a->playfield_h - SHIP_H);
-    }
+     * Those are SAT coordinates. Both modes simulate here; ZANAC MD
+     * scales the draw so the hull stays in the same relative place. */
+    min_x = MODE_SHIP_MIN_X;
+    min_y = 0x1E;
+    max_x = MODE_SHIP_MAX_X;
+    max_y = 0xB8;
 
     /* 0x7618: E10C == 4 is "nothing held", which skips the move entirely.
      * Otherwise xvel_table picks a 16-dir unit vector and set_velocity_from_dir
