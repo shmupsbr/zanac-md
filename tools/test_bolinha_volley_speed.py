@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """White bolinha ×3+ feel slow: programmed speed vs DMA slowdown.
 
-Filipe after #144: groups of 3+ white discs feel very slow. Diagnose:
+Filipe after #151 (look locked): groups of 3+ white discs (caixinha×3)
+feel like molasses. Appearance is correct — do not change art / colour.
+He asks: reuse the same sprite and only multiplex?
 
 Japan v1 type 38 (box×3 / stealth volley / umber burst):
   8507  LD (IX+0x17),0x03     ; speed byte 3
   851d  CALL 4cf7             ; unit mag 128 * 3 = 1.5 px/frame cardinal
 Port apply_dir_88(e, dir, 3) matches. NOT half of MSX — do not double.
 
-#144 slowdown: spr_upload_color refused the matching-(frame,15) skip
-under ebullet_normal_lock, so every NORMAL disc DMA'd paint_all-15
-(128 B) every tick. Three live discs = 384 B/frame of redundant VRAM
-plus 68000 remap — same class as the orb "slowdown da porra".
-shot_vram_prepare also returned 0 unconditionally, so the three
-shots could not share a (FRAME_LEAD,15) bank.
+#144 DMA every tick was one hitch. #151 still serialised per-shot
+AUTO_VRAM alloc/free + paint + apply_vis upload on every disc. A
+3-frag volley hitch drops the game off 60fps so speed-3 looks slow.
 
-Safe fix (this PR): restore matching skip (own-after-place already
-stops SPR_update loadTiles poison); share a remembered 15 bank;
-leave speed 3.
+Safe fix: one shared FRAME_LEAD pin DMA; every live disc points at
+that tile index (no AUTO_VRAM, no per-shot paint after the first);
+apply_vis is a no-op when already on the pin. Leave speed 3.
 
 Usage (from zanac-md):
     python tools/test_bolinha_volley_speed.py
@@ -112,6 +111,52 @@ def main() -> int:
     if "ebullet_lead_disc" not in prep:
         return fail("prepare must key lead discs separately from type 21")
     print("  shot_vram_prepare: FRAME_LEAD pin share (3+ volley speed)")
+
+    place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
+    if "share ? 0 : SPR_FLAG_AUTO_VRAM_ALLOC" not in place.replace(" ", "").replace(
+        "\n", ""
+    ) and "share ? 0 : SPR_FLAG_AUTO_VRAM_ALLOC" not in place:
+        return fail("lead share must addSprite without AUTO_VRAM (multiplex, no alloc/free)")
+    if "if (share)" not in place or "shot_vram_point" not in place:
+        return fail("lead share must point at the pin index")
+    print("  spr_place: multiplex pin tiles; no per-disc AUTO_VRAM")
+
+    point = fn_span(ent, "static void shot_vram_point(Sprite *sp, u16 idx)") or ""
+    if "TILE_INDEX_MASK" not in point or "SPR_FLAG_AUTO_VRAM_ALLOC" not in point:
+        return fail("shot_vram_point must no-op when already on the shared index")
+    if "SPR_setVRAMTileIndex" not in point or "SPR_setAutoTileUpload" not in point:
+        return fail("shot_vram_point must still drop AUTO_TILE_UPLOAD before setVRAM")
+    print("  shot_vram_point: no-op when already multiplexed")
+
+    onpin = fn_span(ent, "static int ebullet_lead_on_pin(const Slot *s, u8 want)") or ""
+    if not onpin or "FRAME_LEAD" not in onpin or "lead7_pin_has_idx" not in onpin:
+        return fail("ebullet_lead_on_pin must detect a disc already on the pin")
+    print("  ebullet_lead_on_pin: multiplex occupancy")
+
+    setc = fn_span(ent, "static void spr_set_sat_col(Slot *s, u8 col)") or ""
+    if "ebullet_lead_on_pin" not in setc:
+        return fail("NORMAL apply_vis/set_sat_col must skip paint when already on pin")
+    apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)") or ""
+    if "ebullet_lead_on_pin" not in apply:
+        return fail("apply_vis must no-op a white disc already on the pin")
+    print("  apply_vis: no per-tick paint on a pinned white disc")
+
+    up7 = fn_span(ent, "static int ebullet_upload_lead7(Slot *s, u8 want)") or ""
+    if "DMA_queueDma" in up7:
+        return fail("ebullet_upload_lead7 must not DMA; pin owns the one upload")
+    if "ebullet_lead_on_pin" not in up7:
+        return fail("upload_lead7 must skip work when already on the pin")
+    pin = fn_span(ent, "static int lead7_pin_ensure(u8 want, u16 *out)") or ""
+    if "DMA_queueDma" not in pin or "FRAME_LEAD" not in pin:
+        return fail("only lead7_pin_ensure DMA's FRAME_LEAD tiles (once)")
+    if re.search(r"SPR_setAnimAndFrame\s*\([^)]*FRAME_CIRCLE", pin):
+        return fail("do not restore the #150 16x16 vehicle")
+    print("  upload: one pin DMA; later discs only point")
+
+    if re.search(r"VDP_allocateTiles\s*\(", ent) or re.search(
+        r"VDP_releaseTiles\s*\(", ent
+    ):
+        return fail("do not reintroduce VDP_allocateTiles/releaseTiles")
 
     sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""
     if "shot_vram_own" not in sync or "ebullet_normal_lock" not in sync:
