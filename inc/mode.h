@@ -26,7 +26,7 @@ typedef struct {
     u16 screen_width;
     u16 playfield_w;    /* sim space: always MODE_MSX_W (256) */
     u16 playfield_h;    /* sim space: always MODE_MSX_H (192) */
-    u16 y_off;          /* Original: screen Y = sim Y + 16. MD: unused */
+    u16 y_off;          /* Original 16 letterbox. Zanac MD 0 (1:1 Y). */
     const char *name;
 } ModeAssets;
 
@@ -48,7 +48,7 @@ const ModeAssets *mode_assets(void);
 void mode_apply_video(void);
 
 /* Sim Y -> sprite/plane screen Y. Original +16 letterbox. Zanac MD:
- * y * 224/192. Collision stays on sim Y. */
+ * y_off 0 (1:1 with the 8px nametable). Collision stays on sim Y. */
 s16  mode_draw_y(s16 y);
 /* Sim X -> sprite screen X. SAT colour bit7 (TMS EC) is X-32, then
  * Zanac MD scales * 320/256. Draw only — 4560 uses stored SAT X. */
@@ -56,7 +56,7 @@ s16  mode_draw_x(s16 x, u8 sat_col);
 u16  mode_y_off(void);
 u16  mode_text_row(u16 msx_row);
 
-/* BG_B VSRAM low-8: Original scroll_px+16, Zanac MD scroll_px*224/192. */
+/* BG_B VSRAM low-8: scroll_px + y_off (Original +16, Zanac MD +0). */
 u16  mode_camera_off(u16 scroll_px);
 /* Screen Y of SAT 0 / playfield top. Original 16, Zanac MD 0. */
 u16  mode_playfield_top(void);
@@ -64,8 +64,6 @@ u16  mode_playfield_top(void);
 u16  mode_map_cols(void);
 /* MSX playfield col 0..23 → H40 dest [x0, x0+n). n is 1 or 2. */
 void mode_map_dest_cols(u8 msx_col, u8 *x0, u8 *n);
-/* 1 if this MSX map-row index occupies two NT rows (24*7/6 = 28). */
-int  mode_map_dup_row(u16 msx_row);
 
 /* PAL0 priority black tile used by BG_A letterbox and BG_B unused wrap rows. */
 u16  mode_letter_attr(void);

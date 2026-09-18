@@ -68,10 +68,10 @@ const ModeAssets *mode_assets(void)
 
 s16 mode_draw_y(s16 y)
 {
-    if (s_mode == MODE_ORIGINAL)
-        return (s16)(y + (s16)s_cur->y_off);
-    /* ZANAC MD: y * 224/192. 68k signed 32 so SAT Y < 0 still scales. */
-    return (s16)(((s32)y * (s32)MODE_MD_H) / (s32)MODE_MSX_H);
+    /* Both modes: sim Y + letterbox. Zanac MD y_off is 0 so this is 1:1
+     * with wrap/peek (8px tiles). Do not *224/192 — that plus a 24→28
+     * nametable dup skipped wrap rows and doubled a band mid-screen. */
+    return (s16)(y + (s16)s_cur->y_off);
 }
 
 s16 mode_draw_x(s16 x, u8 sat_col)
@@ -117,23 +117,17 @@ u16 mode_y_off(void)
 
 u16 mode_text_row(u16 msx_row)
 {
-    if (s_mode == MODE_ORIGINAL)
-        return (u16)(msx_row + (s_cur->y_off / 8));
-    return (u16)((msx_row * MODE_MD_H) / MODE_MSX_H);
+    return (u16)(msx_row + (s_cur->y_off / 8));
 }
 
 u16 mode_camera_off(u16 scroll_px)
 {
-    if (s_mode == MODE_ORIGINAL)
-        return (u16)((scroll_px + s_cur->y_off) & 0xFF);
-    return (u16)(((u32)scroll_px * (u32)MODE_MD_H / (u32)MODE_MSX_H) & 0xFF);
+    return (u16)((scroll_px + s_cur->y_off) & 0xFF);
 }
 
 u16 mode_playfield_top(void)
 {
-    if (s_mode == MODE_ORIGINAL)
-        return 16;
-    return 0;
+    return s_cur->y_off;
 }
 
 u16 mode_map_cols(void)
@@ -160,14 +154,6 @@ void mode_map_dest_cols(u8 msx_col, u8 *x0, u8 *n)
     *n = (u8)(b - a);
 }
 
-int mode_map_dup_row(u16 msx_row)
-{
-    /* 24 source rows → 28 dest: extra row after every 6th (row 6,12,18…). */
-    if (s_mode == MODE_ORIGINAL)
-        return 0;
-    return (msx_row != 0) && ((msx_row % 6) == 0);
-}
-
 void mode_apply_video(void)
 {
     if (s_mode == MODE_ORIGINAL)
@@ -186,6 +172,9 @@ void mode_apply_video(void)
     {
         VDP_setWindowOff();
         VDP_setScreenWidth320();
+        /* Same PAL0 black tile Original uses for wrap/HUD backing, so
+         * unused H40 cols 30-39 and NT 24-31 cannot keep title garbage. */
+        load_letter_tile();
     }
 }
 

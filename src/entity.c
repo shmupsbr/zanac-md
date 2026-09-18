@@ -1383,8 +1383,8 @@ static int proj_draw_hidden(const Slot *s)
  */
 static s16 slot_draw_y(const Slot *s)
 {
-    /* Original: y_off + (ground ? frac : 0). Zanac MD scales the summed
-     * Y so ground sprites ride the 7/6 camera with the nametable. */
+    /* Original: y_off + (ground ? frac : 0). Zanac MD y_off is 0 so
+     * ground sprites ride the 1px camera with the nametable. */
     if (s->ground)
         return mode_draw_y((s16)(s->y + (s16)map_script_scroll_frac()));
     return mode_draw_y(s->y);

@@ -78,8 +78,8 @@ def main() -> int:
         return fail("bg_set_vscroll not found")
     if "s_scroll_px & 0xFFF8" in bg or "s_scroll_px & ~7" in bg:
         return fail("bg_set_vscroll must use raw s_scroll_px, not tile snap")
-    if "s_scroll_px + mode_y_off()" not in bg:
-        return fail("VSCROLL must be -(scroll_px + y_off)")
+    if "mode_camera_off(s_scroll_px)" not in bg:
+        return fail("VSCROLL must be -mode_camera_off (scroll_px + y_off)")
     if "VDP_setVerticalScroll" in bg:
         return fail("bg_set_vscroll must latch VSRAM, not write mid-display")
     if "& 0x3FF" not in bg:

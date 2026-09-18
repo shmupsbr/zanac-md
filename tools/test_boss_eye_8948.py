@@ -89,7 +89,7 @@ def main() -> int:
     )
     if not wrap:
         return fail("hidden_wrap_nt_at not found")
-    if "16 - off" not in wrap.group(1):
+    if "16 - off" not in wrap.group(1) and "mode_playfield_top() - off" not in wrap.group(1):
         return fail("hidden_wrap must be playfield top (screen Y 16 / SAT Y 0)")
     if "8 - off" in wrap.group(1):
         return fail("hidden_wrap Y=8 is the letterbox row (south lens / seam)")
