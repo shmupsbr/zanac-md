@@ -12,7 +12,7 @@
  *   MSX playfield  A×B = MODE_MSX_W × MODE_MSX_H = 256×192
  *   MD  screen     C×D = MODE_MD_W  × MODE_MD_H  = 320×224  (H40)
  *
- * X transform (same relative column on the 320-wide screen):
+ * X sprites (placeholders; Filipe is not scoring these now):
  *
  *   x_md ≈ x_msx * C/A = x_msx * 320/256 = x_msx * 5/4
  *
@@ -29,10 +29,17 @@
  * cells, and stamps still bind tile_wrap + Y/8. E800 / wrap / peek /
  * VSCROLL stay the Original 24-row 8px grid (y_off = 0, no letterbox).
  *
- * Nametable X: 24 MSX playfield cols → 30 H40 cols (24 * 5/4). The
- * leftover 10 cols (80px) are a cleared strip (MD has no WINDOW HUD).
- * Row DMA and cell stamps share mode_map_dest_cols so a wreck sits
- * on the same dest cells the stretched row wrote.
+ * Nametable X is 1:1, not 24→30. Duplicating whole 8px columns (every
+ * 4th source col twice) is repeating/stretched garbage — the map after
+ * #161. Each MSX playfield col occupies one H40 col. The 24-col field
+ * is centered in 40 (MODE_MD_X0 = 8): dest col = 8 + msx_col. Gutters
+ * 0–7 and 32–39, and unused wrap NT 24–31, are the empty-playfield
+ * sky (charset 0x28), not PAL0 black letterbox bars. Row DMA and cell
+ * stamps share mode_map_dest_cols.
+ *
+ * H40 must use a 64-wide plane. A 32-wide map wraps cols 32–39 onto
+ * 0–7, so leftover fills punch the left of the stage and the right
+ * 8 visible columns repeat the left.
  *
  * Sprite size (occupies ~the same screen fraction; snap to 8×8 / SGDK
  * 1–4 tiles). Art is still the 16×16 MSX placeholders — Filipe redraws
@@ -51,8 +58,10 @@
 #define MODE_MD_H           224
 
 #define MODE_MSX_PF_COLS    24      /* nametable playfield; HUD 24-31 */
-#define MODE_MD_PF_COLS     30      /* 24 * 320/256 = 30 */
+#define MODE_MD_PF_COLS     24      /* 1:1; do not dup 24→30 */
+#define MODE_MD_X0          8       /* center 24 cols in H40 (8+24+8) */
 #define MODE_H40_COLS       40
+#define MODE_PLANE_COLS     64      /* H40-safe plane width (no wrap) */
 
 #define MODE_MSX_SPR_W      16
 #define MODE_MSX_SPR_H      16

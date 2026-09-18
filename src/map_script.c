@@ -156,9 +156,9 @@ static u8  s_idol_mid;
 /* Two DMA_QUEUE HUD sources -- SGDK stores the pointer until vblank.
  * Playfield is 24-col queued DMA (Japan 9a79 vblank OUT); HUD 24-31
  * restore is the other slice. Original pads dst[24-31] so the restore
- * cannot leak leftover charset. Zanac MD expands to 30 H40 cols plus
- * a 10-col letter fill in the same buffer (MODE_H40_COLS); Original
- * still only writes 32. Wrap+peek queue 2 rows; ring 0/1 both modes. */
+ * cannot leak leftover charset. Zanac MD writes a full H40 row (1:1
+ * 24-col field centered at MODE_MD_X0, sky gutters); Original still
+ * only writes 32. Wrap+peek queue 2 rows; ring 0/1 both modes. */
 static u16 s_dma_row[2][MODE_H40_COLS];
 static u8  s_dma_flip;
 static TransferMethod s_row_tm = DMA_QUEUE;
@@ -768,25 +768,21 @@ static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm)
         u8 d;
         u8 n;
         u8 x0;
-        u16 blank = mode_letter_attr();
-        u16 cols = mode_map_cols();
+        u16 sky = tile_attr(0x28);
 
-        /* Same src→dest map as stamp_vram. dest[d]=src[d*24/30] repeated
-         * the previous col and disagreed with wreck/digit stamps. */
+        /* 1:1 src→dest (centered). dest[d]=src[d*24/30] and the later
+         * src→dest n=1|2 map both duplicated whole columns. */
+        for (d = 0; d < MODE_H40_COLS; d++)
+            dst[d] = sky;
         for (c = 0; c < PF_COLS; c++)
         {
             mode_map_dest_cols(c, &x0, &n);
             for (d = 0; d < n; d++)
                 dst[x0 + d] = tile_attr(src[c]);
         }
-        for (d = (u8)cols; d < MODE_H40_COLS; d++)
-            dst[d] = blank;
-        VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, cols, play_tm);
+        VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, MODE_H40_COLS, play_tm);
         if (tm == DMA_QUEUE)
             VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, 1, DMA_QUEUE);
-        /* Leftover 10 H40 cols: letter backing, not title/charset. */
-        VDP_setTileMapDataRow(BG_B, dst + cols, nt_y, cols,
-                              (u16)(MODE_H40_COLS - cols), tm);
     }
     /* DMA_QUEUE keeps the HUD source pointer until vblank -- do not
      * reuse this buffer while that restore is queued. */
@@ -806,36 +802,42 @@ static void flush_boot_playfield(void)
 {
     u8 i;
 
-    /* Both modes: 24 MSX rows onto NT 0-23. Zanac MD stretches each
-     * row 24→30 inside dma_nt_row; do not duplicate 24→28 here. */
+    /* Both modes: 24 MSX rows onto NT 0-23. Zanac MD places each
+     * row 1:1 at MODE_MD_X0 inside dma_nt_row; do not duplicate 24→28
+     * and do not stretch X 24→30. */
     for (i = 0; i < BOOT_ROWS; i++)
         dma_nt_row(i, s_e800[(u8)((s_e714 + i) % BOOT_ROWS)], DMA);
 }
 
 /*
- * Unused 32-row wrap (NT 24-31 at boot) is the same PAL0 black tile as
- * BG_A letterbox -- never charset 0x28. Prefetch overwrites NT 31 with map.
- * Original: full H32 width so cols 24-31 of a wrap row are not leftover.
- * Zanac MD: H40 wrap plus cols 30-39 of the playfield rows.
+ * Unused 32-row wrap (NT 24-31 at boot). Prefetch overwrites NT 31 with map.
+ * Original: PAL0 black, full H32 width so cols 24-31 of a wrap row are
+ * not leftover charset. Zanac MD: sky 0x28 on wrap + H40 gutters so the
+ * extra 32px is empty stage, not a black letterbox bar or title leftover.
  */
 static void fill_letterbox_b(void)
 {
-    u16 blank = mode_letter_attr();
-
     if (mode_get() == MODE_ORIGINAL)
     {
-        VDP_fillTileMapRect(BG_B, blank, 0, BOOT_ROWS, MODE_H32_COLS,
-                            (u16)(32 - BOOT_ROWS));
+        VDP_fillTileMapRect(BG_B, mode_letter_attr(), 0, BOOT_ROWS,
+                            MODE_H32_COLS, (u16)(32 - BOOT_ROWS));
         return;
     }
-    /* Zanac MD: no WINDOW HUD. Unused wrap (NT 24-31) and H40 leftover
-     * (cols 30-39) must not keep title / charset garbage. Y stays 1:1
-     * so peek/wrap match Original; the extra 32px at scroll=0 is this
-     * fill, not a duplicated map band. */
-    VDP_fillTileMapRect(BG_B, blank, 0, BOOT_ROWS, MODE_H40_COLS,
-                        (u16)(32 - BOOT_ROWS));
-    VDP_fillTileMapRect(BG_B, blank, MODE_MD_PF_COLS, 0,
-                        (u16)(MODE_H40_COLS - MODE_MD_PF_COLS), BOOT_ROWS);
+    /* Zanac MD: no WINDOW HUD. 64-wide plane. Unused wrap (NT 24-31)
+     * and H40 gutters (cols 0-7 / 32-63) are empty-playfield sky so
+     * Y 1:1 peek/wrap match Original without a duplicated map band
+     * or a PAL0 letterbox through the stage. */
+    {
+        u16 sky = tile_attr(0x28);
+        u8 x0 = MODE_MD_X0;
+        u8 x1 = (u8)(MODE_MD_X0 + MODE_MD_PF_COLS);
+
+        VDP_fillTileMapRect(BG_B, sky, 0, BOOT_ROWS, MODE_PLANE_COLS,
+                            (u16)(32 - BOOT_ROWS));
+        VDP_fillTileMapRect(BG_B, sky, 0, 0, x0, BOOT_ROWS);
+        VDP_fillTileMapRect(BG_B, sky, x1, 0,
+                            (u16)(MODE_PLANE_COLS - x1), BOOT_ROWS);
+    }
 }
 
 /*
@@ -1068,8 +1070,7 @@ static void peek_next_row(u16 map_row)
 }
 
 /* Stamp one MSX playfield cell onto BG_B. Original: 1:1 col. Zanac MD:
- * 24→30 so a wreck/digit sits under the scaled sprite. E800/s_nt stay
- * 24-col. */
+ * 1:1 at MODE_MD_X0 (centered). E800/s_nt stay 24-col. */
 static void stamp_vram(u8 msx_col, u8 nt_row, u8 tid)
 {
     u16 attr = tile_attr(tid);
