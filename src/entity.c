@@ -356,11 +356,14 @@
  * 8659 always colour-walks (8639 JR NZ 8659, no vis option).
  * Skill / ALC never enter. XOR walkers stay on nibble 2.
  *
- * #150 encoded Japan gfx pat 7 into a 16x16 FRAME_CIRCLE vehicle.
- * Playtest: that is a ship-sized blob, not a bolinha. The pre-#150
- * FRAME_LEAD sprite (objs.png ~14 px / SGDK 8x8) was the accepted
- * size. Colour still needs an exclusive pin so type 21 / fire 7
- * cannot DMA walked nibbles onto the shared FRAME_LEAD tiles. */
+ * #151 restored the small FRAME_LEAD sprite (objs.png ~14 px /
+ * SGDK 8x8). Appearance is locked: do not change size, nibble paint,
+ * sat_col, or colour rules. Type 21 stays on its own pat-6 tiles.
+ *
+ * Volley molasses was per-shot work, not velocity. One hidden pin
+ * DMA of the white FRAME_LEAD tiles; every live disc multiplexes
+ * that same tile index (no AUTO_VRAM alloc/free, no paint after
+ * the first). Type 21 / fire 7 must not DMA onto that span. */
 #define LEAD_PACKED_NIB     4   /* SGDK FRAME_LEAD pixels; never 8659 */
 #define LEAD_WHITE_NIB     15   /* NORMAL Japan 0x8F bake; never walked */
 #define FLYER_GREEN_NIB     3   /* type 44 / veybar 22/23 sat_col 0x83 */
@@ -648,6 +651,7 @@ static void spr_sync_proj(Slot *s);
 static void spr_place(Slot *s, u16 frame);
 static void shot_vram_reset(void);
 static int lead7_pin_ensure(u8 want, u16 *out);
+static int ebullet_lead_on_pin(const Slot *s, u8 want);
 static void ebullet_place_lead(Slot *e);
 static u8 rnd(void);
 
@@ -955,6 +959,11 @@ static void shot_vram_own(Sprite *sp)
 {
     if (!sp)
         return;
+    /* Already owned: skip the SGDK call. A 3+ volley used to own
+     * each disc several times per tick. */
+    if (!(sp->status & SPR_FLAG_AUTO_TILE_UPLOAD)
+        && !(sp->status & SPR_FLAG_NEED_TILES_UPLOAD))
+        return;
     SPR_setAutoTileUpload(sp, FALSE);
     sp->status &= (u16)~SPR_FLAG_NEED_TILES_UPLOAD;
 }
@@ -969,6 +978,11 @@ static void shot_vram_point(Sprite *sp, u16 idx)
     if (!sp)
         return;
     shot_vram_own(sp);
+    /* Already multiplexed onto this index and not holding an AUTO
+     * slot: skip the SGDK retarget (that VRAM_free's leftovers). */
+    if ((u16)(sp->attribut & TILE_INDEX_MASK) == idx
+        && !(sp->status & SPR_FLAG_AUTO_VRAM_ALLOC))
+        return;
     SPR_setAutoTileUpload(sp, FALSE);
     SPR_setVRAMTileIndex(sp, (s16)idx);
     /* setVRAMTileIndex ORs NEED_TILES_UPLOAD when AUTO_TILE_UPLOAD
@@ -1060,6 +1074,16 @@ static int lead7_pin_has_idx(u16 idx)
     if (s_lead7_high.used && s_lead7_high.index == idx)
         return 1;
     return 0;
+}
+
+/* Live disc already multiplexes the pin for this nibble. */
+static int ebullet_lead_on_pin(const Slot *s, u8 want)
+{
+    if (!s->spr)
+        return 0;
+    if (s->vram_fr != FRAME_LEAD || s->vram_nib != want || s->sat != 0x1C)
+        return 0;
+    return lead7_pin_has_idx((u16)(s->spr->attribut & TILE_INDEX_MASK));
 }
 
 static void shot_vram_reset(void)
@@ -2006,8 +2030,8 @@ static int ebullet_upload_lead7(Slot *s, u8 want)
 
     if (!sp || !ebullet_lead_disc(s))
         return 0;
-    if (s->vram_fr == FRAME_LEAD && s->vram_nib == want && s->sat == 0x1C
-        && lead7_pin_has_idx((u16)(sp->attribut & TILE_INDEX_MASK)))
+    /* Already pointing at the shared pin: no DMA, no setVRAM. */
+    if (ebullet_lead_on_pin(s, want))
         return 1;
     if (!lead7_pin_ensure(want, &idx))
         return 0;
@@ -2108,6 +2132,16 @@ static void spr_upload_color(Slot *s)
         /* 873e LDIRVM SGT 0x1800, not spr_objs. */
         riser_dma_sgt(s);
         return;
+    }
+    /* Multiplex: lead discs sit on the shared FRAME_LEAD pin. Point
+     * (or no-op) and return — no tileset remap, no paint_all DMA. */
+    if (ebullet_lead_disc(s))
+    {
+        u8 lead_want;
+
+        lead_want = ebullet_cram_shot(s) ? LIGHTBAR_CRAM_NIB : LEAD_WHITE_NIB;
+        if (ebullet_upload_lead7(s, lead_want))
+            return;
     }
     if (!sp->frame || s->frame >= FRAME_N)
         return;
@@ -2289,6 +2323,12 @@ static void spr_set_sat_col(Slot *s, u8 col)
     {
         u8 had_cram = s->cram_nib;
 
+        /* Already white on the shared pin: no paint, no CRAM. */
+        if (!had_cram && s->sat_col == 0x8F && ebullet_lead_on_pin(s, 15))
+        {
+            shot_vram_own(s->spr);
+            return;
+        }
         if (had_cram)
             xor_cram_release(s);
         if (s->sat_col != 0x8F || s->vram_nib != 15 || had_cram)
@@ -2346,9 +2386,14 @@ static void ebullet_apply_vis(Slot *e)
     if (!ebullet_bolinha(e))
         return;
     if (options_bullet_high())
+    {
         ebullet_8659(e);
-    else
-        spr_set_sat_col(e, 0x8F);
+        return;
+    }
+    /* NORMAL: already multiplexed on the white pin — skip the choke. */
+    if (e->sat_col == 0x8F && !e->cram_nib && ebullet_lead_on_pin(e, 15))
+        return;
+    spr_set_sat_col(e, 0x8F);
 }
 
 static void spr_place(Slot *s, u16 frame)
@@ -2391,16 +2436,19 @@ static void spr_place(Slot *s, u16 frame)
                                             lead7_pin_ntiles(&s_lead7_white)))
                 share = 1;
         }
+        /* Multiplex: pin/bank already holds tiles. Do not AUTO_VRAM
+         * allocate then VRAM_free per disc (caixinha×3 hitch). */
         s->spr = SPR_addSpriteEx(&spr_objs, mode_draw_x(s->x, s->sat_col),
                                  slot_draw_y(s),
                                  TILE_ATTR(PAL2, FALSE, FALSE, FALSE),
-                                 SPR_FLAG_AUTO_VRAM_ALLOC);
+                                 share ? 0 : SPR_FLAG_AUTO_VRAM_ALLOC);
         if (s->spr)
         {
             s->spr->data = (u32)s;
-            SPR_setFrameChangeCallback(s->spr, spr_frame_cb);
             /* addSprite defaults to objs frame 0 (shot). Hide, set SAT
-             * name, upload tiles, then spr_sync may show. */
+             * name, point at the pin, then spr_sync may show. Callback
+             * after setAnimAndFrame so the first place does not paint
+             * twice (setFrame used to fire spr_upload_color). */
             SPR_setVisibility(s->spr, HIDDEN);
             SPR_setPriority(s->spr, FALSE);
             SPR_setAnimAndFrame(s->spr, 0, frame);
@@ -2412,6 +2460,7 @@ static void spr_place(Slot *s, u16 frame)
             shot_vram_own(s->spr);
             if (share)
                 shot_vram_point(s->spr, bank_idx);
+            SPR_setFrameChangeCallback(s->spr, spr_frame_cb);
             /* Never tag vram_fr/vram_nib here. A share hit used to skip
              * spr_upload_color, leaving packed nibble 4 keyed as 15. */
             spr_upload_color(s);

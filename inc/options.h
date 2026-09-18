@@ -88,9 +88,10 @@
  * vehicle — that is ship-sized and rejected in playtest. NORMAL
  * paint_all-15 + keep_body 15; HIGH paint_all TYPE21_CRAM_NIB and
  * 8659-walks PAL2[5]. Type 21 keeps pat 6 (`<===>`) on its own
- * tiles. PAL2[15] and PAL2[3] stay fixed. Every lead disc shares
- * the exclusive FRAME_LEAD pin (no per-tick DMA). No VDP_allocateTiles.
- * No per-tick rebuild.
+ * tiles. PAL2[15] and PAL2[3] stay fixed. Every lead disc shares /
+ * multiplexes the exclusive FRAME_LEAD pin (one VRAM upload; later
+ * discs only point at that tile index — no AUTO_VRAM, no per-shot
+ * paint DMA). No VDP_allocateTiles. No per-tick rebuild.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1
