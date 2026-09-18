@@ -3,11 +3,15 @@
 #include "title.h"
 #include "mode.h"
 #include "sound.h"
+#include "map_script.h"
 
 /* MSX vblank_isr 0x43DA calls psg_sound_tick 0x4E7B after SAT DMA and
- * scroll_vram_write — once per vblank, never gated on the game loop. */
+ * scroll_vram_write — once per vblank, never gated on the game loop.
+ * MD VSRAM is a vblank port: latch the 1px camera in the sim tick and
+ * commit it here so the plane does not stair-step on 8px cell writes. */
 static void vint_psg(void)
 {
+    map_script_apply_vscroll();
     sound_tick();
 }
 

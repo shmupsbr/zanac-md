@@ -10,6 +10,10 @@
 #include "options.h"
 #include <string.h>
 
+#ifndef VDP_WRITE_VSRAM_ADDR
+#define VDP_WRITE_VSRAM_ADDR(adr)   (((0x4000 + ((adr) & 0x3FFF)) << 16) + (((adr) >> 14) | 0x10))
+#endif
+
 /*
  * 13-command jump table, matching MSX 0x94EB.
  * Operand grammar from zanac-re/tools/decode_mapscript2.py.
@@ -121,13 +125,19 @@ static const u8 k_clear_award[19] = {
     0x0F, 0x10, 0x11, 0x11, 0x00, 0x00, 0x00, 0x11,
     0x12, 0x13, 0x14
 };
-/* Intentional MD enhancement: TMS nametable is 8px steps (97e3 on
- * E711 carry). VSCROLL uses the leftover E711>>5 so the plane slides
- * 1px/tick at E710=0x20. Do not snap this to 8. Stamps stay tile_wrap. */
-static u16 s_scroll_px;         /* pixel VSCROLL = 8*(row-base) + (E711>>5) */
+/* MD plane camera (VSRAM), not TMS character-cell scroll.
+ * 97e3 still assembles one 8×8 nametable row on E711 carry — tiles are
+ * 8px and stamps/SAT stay on that grid. The camera itself is pixels:
+ *   s_scroll_px = 8*(row-base) + (E711>>5)
+ * E710=0x20 is exactly 1px/tick; cruise 0x34 is 1–2px (same average as
+ * MSX 8px/carry, without an 8px jump). VSRAM is latched here and written
+ * from VInt. Do not snap s_scroll_px to 8. Stamps stay tile_wrap. */
+static u16 s_scroll_px;         /* pixel camera = 8*(row-base) + (E711>>5) */
 static u8  s_scroll_delta;      /* pixels advanced this frame */
 static u8  s_row_carry;         /* E700 bit 1: 97e3 ran this frame */
 static u16 s_scroll_base;       /* E702 after build_tile_screen; VSCROLL 0 */
+static u16 s_vsram_b;           /* 10-bit BG_B VSRAM, latched for VInt */
+static u8  s_vsram_arm;         /* 1 = in-game; title must not overwrite */
 static u8  s_skip_precompute;   /* cmd 9 941b RET: this step does not 97e3 */
 static u8  s_ram_only;          /* boot: assemble E800 without poking VRAM */
 static u8  s_assemble_peek;     /* peek assemble: tiles only, no place */
@@ -168,6 +178,7 @@ static void peek_next_row(u16 map_row);
 static u8 hidden_wrap_nt_at(u16 scroll_px);
 static int sat_to_nt(s16 x, s16 y, u8 *col, u8 *row);
 static void fill_letterbox_b(void);
+static void vsram_write_b(u16 vs_b);
 static void bg_set_vscroll(void);
 static void base_mode_11(void);
 static void place_ctrl_at(u16 ptr);
@@ -773,18 +784,46 @@ static void fill_letterbox_b(void)
  * TMS nametable row 0 is screen row 0 (no VSCROLL, 24 rows). MD 32-row
  * plane plus 16px letterbox must start at VSCROLL = -scroll_px - y_off so
  * NT 0 sits at the top of the 192, not in screen Y 0-15.
- * VSRAM is 10-bit; the plane wraps at 256px -- keep the low 8 bits.
+ * VSRAM is 10-bit unsigned; the 256px plane uses the low 8 bits of that
+ * 10-bit wrap. Write from VInt (vblank), not during the sim tick —
+ * Charles MacDonald: VSRAM is a vblank port. Mid-display writes were
+ * ignored or tore, so the eye still saw 8px 97e3 cell jumps.
  */
+static void vsram_write_b(u16 vs_b)
+{
+    vu32 *pl = (vu32 *)VDP_CTRL_PORT;
+    vu16 *pw = (vu16 *)VDP_DATA_PORT;
+
+    *pl = VDP_WRITE_VSRAM_ADDR(0);
+    *pw = 0;
+    *pl = VDP_WRITE_VSRAM_ADDR(2);
+    *pw = vs_b;
+}
+
 static void bg_set_vscroll(void)
 {
     u16 off;
+    u8 was_arm;
 
-    VDP_setVerticalScroll(BG_A, 0);
     off = (u16)((s_scroll_px + mode_y_off()) & 0xFF);
-    VDP_setVerticalScroll(BG_B, (s16)(-(s16)off));
+    s_vsram_b = (u16)(-(s16)off) & 0x3FF;
+    was_arm = s_vsram_arm;
+    s_vsram_arm = 1;
+    /* Boot / first arm: display is often off; commit now so the first
+     * visible frame is already at -y_off, not VSCROLL 0 (16px too high).
+     * Later ticks only latch — VInt writes the register in vblank. */
+    if (!was_arm)
+        vsram_write_b(s_vsram_b);
     /* Letterbox tiles live on BG_A / WINDOW (VSCROLL 0). They are
      * stamped once at boot / hud_wipe. Filling them every tick was a
      * second VRAM burst on top of SYS_doVBlankProcess. */
+}
+
+void map_script_apply_vscroll(void)
+{
+    if (!s_vsram_arm)
+        return;
+    vsram_write_b(s_vsram_b);
 }
 
 /* 97e3 scroll_precompute: DEC E714 (wrap 0->23), assemble once. */
@@ -1643,11 +1682,13 @@ static void bg_init(void)
 {
     if (mode_get() == MODE_ORIGINAL)
         VDP_setEnable(FALSE);
+    /* Plane scroll: 1px VSRAM, not 16px column VSCROLL, and not
+     * TMS character-cell jumps. HSCROLL stays 0 (vertical shmup). */
     VDP_setScrollingMode(HSCROLL_PLANE, VSCROLL_PLANE);
     VDP_setHorizontalScroll(BG_A, 0);
     VDP_setHorizontalScroll(BG_B, 0);
-    VDP_setVerticalScroll(BG_A, 0);
-    VDP_setVerticalScroll(BG_B, 0);
+    s_vsram_arm = 0;
+    s_vsram_b = 0;
     VDP_clearPlane(BG_B, TRUE);
     memset(s_nt, 0, sizeof(s_nt));
     bg_load_tiles();
@@ -1661,15 +1702,16 @@ static void bg_init(void)
 
 static void bg_update(void)
 {
-    /* Wrap row is already in VRAM (prefetch / this carry). Then move VSCROLL
-     * and re-clip the 16px bars so wrap/peek cannot leak above the 192. */
+    /* Wrap row is already in VRAM (prefetch / this carry). Latch the 1px
+     * camera; VInt commits VSRAM in vblank. */
     bg_set_vscroll();
 }
 
 void map_script_reset_scroll(void)
 {
-    VDP_setVerticalScroll(BG_A, 0);
-    VDP_setVerticalScroll(BG_B, 0);
+    s_vsram_arm = 0;
+    s_vsram_b = 0;
+    vsram_write_b(0);
     VDP_setHorizontalScroll(BG_A, 0);
     VDP_setHorizontalScroll(BG_B, 0);
 }
@@ -2794,7 +2836,10 @@ void map_script_start_ending(void)
 
 static void scroll_speed_reset(u8 target)
 {
-    s_e710 = 0;
+    /* MD 1px camera: start at E710=0x20 (exactly 1px/tick via E711>>5)
+     * so the first cruise frames are already fine-scroll, then 9480
+     * ramps toward SCROLL_SPEED_TGT 0x34 (1–2px, Zanac average). */
+    s_e710 = 0x20;
     s_e711 = 0;
     s_e712 = target;
     s_e713 = 0;
@@ -3453,6 +3498,8 @@ void map_script_update(void)
             base_hold();
             base_clear_tick();
         }
+        /* Pixel camera (1px). 97e3 used the pre-carry value; latch VSRAM
+         * in bg_update after this. Do not snap to 8 — that is TMS. */
         prev_px = s_scroll_px;
         if (s_end_snapped)
             s_scroll_px = 0;

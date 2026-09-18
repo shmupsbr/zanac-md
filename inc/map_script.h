@@ -100,12 +100,16 @@ void map_script_draw_hud(void);
 void map_script_reset_scroll(void);
 const MapScript *map_script_state(void);
 
-/* Pixels the nametable advanced this frame (E711>>5 + row*8). SAT Y for
- * 8f25-class ground is +8 per E700.1, not this value. */
+/* Pixels the plane camera advanced this frame. SAT Y for 8f25-class
+ * ground is still +8 per E700.1 (gameplay grid), not this value. */
 u8   map_script_scroll_delta(void);
-/* E711>>5 subpixel of MD VSCROLL (0-7). TMS nametable has none.
- * Draw-only for 8f45-class sprites. Collision / SAT stay on the 8px grid. */
+/* Camera pixel & 7. TMS nametable has no fine scroll. Draw-only for
+ * 8f45-class sprites so they track VSRAM. Collision / SAT stay on the
+ * 8px grid; stamps stay tile_wrap. */
 u8   map_script_scroll_frac(void);
+/* VInt: write latched plane VSRAM (BG_A 0, BG_B camera). Title leaves
+ * this disarmed so swirl / groove are not overwritten. */
+void map_script_apply_vscroll(void);
 /* E700 bit 1 this frame: 97e3 ran, or 980e SET bit1. */
 u8   map_script_row_carry(void);
 /* E710 current_scroll_speed. Type 85 8efc: NZ -> dir C, Z -> dir B. */
