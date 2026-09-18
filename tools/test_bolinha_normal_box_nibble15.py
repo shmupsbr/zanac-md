@@ -175,11 +175,11 @@ def main() -> int:
         ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)"
     ) or ""
     arm38 = initf.split("variant == 38")[1][:400] if "variant == 38" in initf else ""
-    if "apply_dir_88(e, dir, 3)" not in arm38:
-        return fail("type 38 must keep Japan speed 3")
+    if "apply_dir_88(e, dir, LEAD_MD_SPEED)" not in arm38:
+        return fail("type 38 must use LEAD_MD_SPEED (MD feel, not Japan 3)")
     if "ebullet_normal_lock(e)" not in initf or "spr_detach(e)" not in initf:
         return fail("NORMAL must drop leftover crate SAT before place")
-    print("  speed: type 38 = 3; leftover SAT detached")
+    print("  speed: type 38 = LEAD_MD_SPEED; leftover SAT detached")
 
     if re.search(r"VDP_allocateTiles\s*\(", ent) or re.search(
         r"VDP_releaseTiles\s*\(", ent

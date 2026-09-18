@@ -233,8 +233,9 @@
  *           Stream-capable (is_port_type): random_x 71c5 Y=0 + type20_init_vel;
  *           also child of umber-9 / stealth-65.
  *           4898 u8 wrap-cull Y>=0xD0 / X>=0xD1 (no s32 X).
- *   37      lead_bullet 84dd/84e3: +0c=3 +17=3, player_pos_snapshot 4c8b
- *           (= aim_4c91 + set_velocity_from_dir 8.8 speed 3). Plain 37 no XOR.
+ *   37      lead_bullet 84dd/84e3: +0c=3 +17=3 Japan, player_pos_snapshot 4c8b
+ *           (= aim_4c91 + set_velocity_from_dir 8.8). Port: LEAD_MD_SPEED
+ *           (6), not Japan 3 — MD feel after #152 still-slow playtest.
  *           84f6 SET 7 / 84fa RET (no 4898). Armed 84fb CALL 4898 / 44a6.
  *           Port: dest/bind/script/timer; apply_dir_88; skip first step;
  *           then 4898 u8 Y>=0xD0/X>=0xD1.
@@ -255,9 +256,10 @@
  *           spr FRAME_LIGHT_BAR; skip first step; 8659 then 4898 u8 wrap-cull.
  *           Child of guns 46-55 / type 85-86. Not in spawn_type_list 0xBECC;
  *           stream path (is_port_type) uses 71c5 + leftover +0x1a=0.
- *   38      burst_fragment 8507: +0x17=3, dir=+0x1a&0x0F, set_vel 8.8 (42/43 path sans XOR)
- *           8520 SET 7 / 8524 RET (no 4898). Armed JR 84fb. Port: skip first
- *           step; then 4898 u8 wrap-cull.
+ *   38      burst_fragment 8507: Japan +0x17=3, dir=+0x1a&0x0F, set_vel 8.8
+ *           (42/43 path sans XOR). Port: LEAD_MD_SPEED 6 (2× Japan 1.5 px/f
+ *           → 3.0 px/f). 8520 SET 7 / 8524 RET (no 4898). Armed JR 84fb.
+ *           Port: skip first step; then 4898 u8 wrap-cull.
  *   41      pair_fragment 852f: child of umber-8 / swoop-29. Not in 0xBECC.
  *           Init 4cf7 speed 2, LDIR +08..+0b -> +1c..+1f, +17=4, RET 857e
  *           (no 857f, no 4898). 857f: heading +/-1 every 2f, 4cf7 speed 4,
@@ -360,12 +362,22 @@
  * SGDK 8x8). Appearance is locked: do not change size, nibble paint,
  * sat_col, or colour rules. Type 21 stays on its own pat-6 tiles.
  *
- * Volley molasses was per-shot work, not velocity. One hidden pin
- * DMA of the white FRAME_LEAD tiles; every live disc multiplexes
- * that same tile index (no AUTO_VRAM alloc/free, no paint after
- * the first). Type 21 / fire 7 must not DMA onto that span. */
+ * #152 multiplex (one pin DMA; later discs only point) removed the
+ * per-shot AUTO_VRAM/paint hitch. Filipe still called volleys
+ * muito lento: remaining slowness is raw vel (Japan +17=3 is
+ * 1.5 px/frame) plus leftover per-tick SGDK own/apply_vis.
+ * This is Mega Drive (MC68000), not MSX — LEAD_MD_SPEED raises
+ * travel above type-38 speed 3. Appearance is locked: do not
+ * change FRAME_LEAD art, nibble paint, sat_col, or colour rules.
+ * Type 21 / fire 7 must not DMA onto the pin span. */
 #define LEAD_PACKED_NIB     4   /* SGDK FRAME_LEAD pixels; never 8659 */
 #define LEAD_WHITE_NIB     15   /* NORMAL Japan 0x8F bake; never walked */
+/* Japan 8507 +17=3 → 128*3 = 1.5 px/f cardinal. MD uses 6 → 3.0 px/f
+ * (2× Japan). Snappy on 60fps without matching player 0xC2 (12 px/f).
+ * Type 21 stays 4; type 45 stays (R&1)+2; type 41 keeps 2+4. */
+#define LEAD_MD_SPEED       6
+typedef char lead_md_faster_than_japan[(LEAD_MD_SPEED > 3) ? 1 : -1];
+typedef char lead_md_under_player_c2[(LEAD_MD_SPEED < 24) ? 1 : -1];
 #define FLYER_GREEN_NIB     3   /* type 44 / veybar 22/23 sat_col 0x83 */
 #define TYPE21_CRAM_NIB     5   /* type 21 / HIGH 8659; not flyer 3 */
 #define LIGHTBAR_CRAM_NIB   TYPE21_CRAM_NIB
@@ -1394,11 +1406,12 @@ static void spr_sync_proj(Slot *s)
     }
     SPR_setPosition(sp, dx, dy);
     spr_vis_playfield(sp, dx, dy, 1);
-    /* NORMAL: own every visible tick so SPR_update cannot loadTiles
-     * packed FRAME_LEAD nibble 4 over paint_all-15. Box×3 spawn during
-     * collide (after update_enemies); this is the last chance before
-     * the hardware upload. HIGH still wants AUTO on nibble 4. */
-    if (ebullet_normal_lock(s))
+    /* NORMAL: own so SPR_update cannot loadTiles packed nibble 4
+     * over paint_all-15. Once the disc multiplexes the pin, AUTO
+     * is already off — skip the SGDK call every tick (caixinha×3
+     * leftover hitch). Spawn still owns via spr_place. */
+    if (ebullet_normal_lock(s)
+        && (s->vram_fr != FRAME_LEAD || s->vram_nib != LEAD_WHITE_NIB))
         shot_vram_own(sp);
 }
 
@@ -2462,7 +2475,9 @@ static void spr_place(Slot *s, u16 frame)
                 shot_vram_point(s->spr, bank_idx);
             SPR_setFrameChangeCallback(s->spr, spr_frame_cb);
             /* Never tag vram_fr/vram_nib here. A share hit used to skip
-             * spr_upload_color, leaving packed nibble 4 keyed as 15. */
+             * spr_upload_color, leaving packed nibble 4 keyed as 15.
+             * upload_lead7 no-ops DMA once the sprite already points
+             * at the pin; it only writes the occupancy tags. */
             spr_upload_color(s);
             shot_vram_own(s->spr);
             sat_bind_depth(s->spr, sat_depth_primary(s));
@@ -2502,6 +2517,19 @@ static void spr_place(Slot *s, u16 frame)
          * packed nibble 4. Drop the flag and NEED before SPR_update. */
         s->spr->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
         shot_vram_own(s->spr);
+        /* Reused lead disc: retarget the pin and stop. No remap, no
+         * second spr_upload_color (68000 / DMA). */
+        if (ebullet_lead_disc(s))
+        {
+            u8 lw = ebullet_cram_shot(s) ? LIGHTBAR_CRAM_NIB : LEAD_WHITE_NIB;
+
+            if (ebullet_upload_lead7(s, lw))
+            {
+                sat_bind_depth(s->spr, sat_depth_primary(s));
+                spr_sync_proj(s);
+                return;
+            }
+        }
         if (s->cram_nib && prev != (s16)frame)
             xor_cram_paint(s, s->cram_nib);
         else
@@ -4717,13 +4745,13 @@ static void apply_dir_4cf7(Slot *e, u8 dir, u8 speed)
     apply_dir_88(e, dir, mul);
 }
 
-/* type 42/43: speed 3 then 85dd XOR R into X/Y vel low bytes. */
+/* type 42/43: LEAD_MD_SPEED then 85dd XOR R into X/Y vel low bytes. */
 static void apply_dir_88_xor(Slot *e, u8 dir)
 {
     u8 rx;
     u8 ry;
 
-    apply_dir_88(e, dir, 3);
+    apply_dir_88(e, dir, LEAD_MD_SPEED);
     rx = rnd();
     ry = rnd();
     e->dest = (u16)((e->dest & 0xFF00) | ((u8)e->dest ^ rx));
@@ -4769,10 +4797,11 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     }
     else if (variant == 37)
     {
-        /* handler_type37 84e3: +0x17=3; player_pos_snapshot 4c8b
-         * (= aim_4c91 then set_velocity_from_dir). Clean speed-3 8.8; no XOR.
-         * Type 42 CALL 84e3 then XOR - keep apply_dir_88_xor below. */
-        apply_dir_88(e, aim_4c91(x, y), 3);
+        /* handler_type37 84e3: Japan +0x17=3; player_pos_snapshot 4c8b
+         * (= aim_4c91 then set_velocity_from_dir). Port: LEAD_MD_SPEED
+         * (MD feel; not MSX 1.5 px/f). No XOR. Type 42 CALL 84e3 then
+         * XOR — keep apply_dir_88_xor below. */
+        apply_dir_88(e, aim_4c91(x, y), LEAD_MD_SPEED);
     }
     else if (variant == 42)
     {
@@ -4807,8 +4836,9 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     else if (variant == 38)
     {
         /* handler_type38_burst_fragment 0x8507:
-         * +0x17=3; dir=+0x1a&0x0F; set_velocity_from_dir (8.8). */
-        apply_dir_88(e, dir, 3);
+         * Japan +0x17=3; dir=+0x1a&0x0F; set_velocity_from_dir (8.8).
+         * Port: LEAD_MD_SPEED 6 (3.0 px/f cardinal). */
+        apply_dir_88(e, dir, LEAD_MD_SPEED);
     }
     else if (variant == 21)
     {
@@ -4843,7 +4873,12 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
         spr_place(e, FRAME_LIGHT_BAR);
     else
         ebullet_place_lead(e);
-    ebullet_apply_vis(e);
+    /* Second vis: HIGH / type 21 still need it. NORMAL pin is done. */
+    if (variant == 21 || variant == 45
+        || e->sat_col != 0x8F || e->cram_nib
+        || e->vram_fr != FRAME_LEAD || e->vram_nib != LEAD_WHITE_NIB
+        || options_bullet_high())
+        ebullet_apply_vis(e);
     /* 37 84fa / 38 8524 / 41 857e / 21 8656: SET 7 RET.
      * 42/43: CALL 84e3/8507 (those RETs return into XOR) then 85ed RET.
      * Type 20 init falls into 4898; type 45 CALL 850b then 8608/82a4. */
@@ -7004,7 +7039,11 @@ static void update_enemies(void)
              * Colour is BULLET VISIBILITY (ebullet_apply_vis), not skill. */
             if ((u8)e->y != 0xFF)
                 e->bind = (u16)(e->bind + 0x000C);
-            ebullet_apply_vis(e);
+            if (e->sat_col != 0x8F || e->cram_nib
+                || e->vram_fr != FRAME_LEAD
+                || e->vram_nib != LEAD_WHITE_NIB
+                || options_bullet_high())
+                ebullet_apply_vis(e);
             if (step_88_4898(e))
                 continue;
             spr_sync_proj(e);
@@ -7024,8 +7063,15 @@ static void update_enemies(void)
              * dir += (R&8)-4 + apply_dir_88(speed) : reload 0x28 then DEC (0x27).
              * 8625: SAT +03 = 0x18 + ((clock&1)<<3) every active frame.
              * Colour: ebullet_apply_vis — type 21 always 8659 (`<===>`);
-             * discs/45 NORMAL white+EC, HIGH 8659. Skill never enters. */
-            ebullet_apply_vis(e);
+             * discs/45 NORMAL white+EC, HIGH 8659. Skill never enters.
+             * NORMAL pinned lead: skip the choke (colour is done). That
+             * JSR chain was leftover 68000 after #152 multiplex. */
+            if (e->variant == 21 || e->variant == 45
+                || e->sat_col != 0x8F || e->cram_nib
+                || e->vram_fr != FRAME_LEAD
+                || e->vram_nib != LEAD_WHITE_NIB
+                || options_bullet_high())
+                ebullet_apply_vis(e);
             if (e->variant == 45)
             {
                 if (e->clock)

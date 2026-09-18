@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
-"""White bolinha ×3+ feel slow: programmed speed vs DMA slowdown.
+"""Bolinha MD speed + 68000 multiplex.
 
-Filipe after #151 (look locked): groups of 3+ white discs (caixinha×3)
-feel like molasses. Appearance is correct — do not change art / colour.
-He asks: reuse the same sprite and only multiplex?
+Filipe after #152 (main tip cd22ef7): appearance locked, still muito
+lento. Product direction is explicit — this is Mega Drive (MC68000),
+not MSX. Two levers:
 
-Japan v1 type 38 (box×3 / stealth volley / umber burst):
-  8507  LD (IX+0x17),0x03     ; speed byte 3
-  851d  CALL 4cf7             ; unit mag 128 * 3 = 1.5 px/frame cardinal
-Port apply_dir_88(e, dir, 3) matches. NOT half of MSX — do not double.
+  1. Raise travel above Japan type-38 +17=3 (1.5 px/frame).
+  2. Keep / tighten multiplex (less DMA, less per-tick SGDK).
 
-#144 DMA every tick was one hitch. #151 still serialised per-shot
-AUTO_VRAM alloc/free + paint + apply_vis upload on every disc. A
-3-frag volley hitch drops the game off 60fps so speed-3 looks slow.
-
-Safe fix: one shared FRAME_LEAD pin DMA; every live disc points at
-that tile index (no AUTO_VRAM, no per-shot paint after the first);
-apply_vis is a no-op when already on the pin. Leave speed 3.
+LEAD_MD_SPEED 6 = 128*6 = 3.0 px/frame cardinal (2× Japan). Type 21
+stays Japan 4. FRAME_LEAD look / NORMAL white / HIGH cycle unchanged.
 
 Usage (from zanac-md):
     python tools/test_bolinha_volley_speed.py
@@ -29,12 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ENT = ROOT / "src" / "entity.c"
-ASM_CANDIDATES = (
-    Path("/tmp/zanac-re/source/zanac.asm"),
-    Path("/tmp/refs/zanac-re/source/zanac.asm"),
-    Path.home() / "zanac-re" / "source" / "zanac.asm",
-    ROOT.parent / "zanac-re" / "source" / "zanac.asm",
-)
+OPT = ROOT / "inc" / "options.h"
 
 
 def fail(msg: str) -> int:
@@ -58,38 +46,52 @@ def fn_span(src: str, sig: str) -> str | None:
     return None
 
 
-def load_asm() -> str | None:
-    for p in ASM_CANDIDATES:
-        if p.is_file():
-            return p.read_text(encoding="utf-8", errors="replace")
-    return None
-
-
 def main() -> int:
     ent = ENT.read_text(encoding="utf-8")
+    opth = OPT.read_text(encoding="utf-8")
+
+    m = re.search(r"#define\s+LEAD_MD_SPEED\s+(\d+)", ent)
+    if not m:
+        return fail("LEAD_MD_SPEED must name the MD travel speed")
+    spd = int(m.group(1))
+    if spd <= 3:
+        return fail("LEAD_MD_SPEED must be above Japan type-38 speed 3 (MD feel)")
+    if spd != 6:
+        return fail("LEAD_MD_SPEED must be 6 (3.0 px/f = 2× Japan 1.5)")
+    if "lead_md_faster_than_japan" not in ent:
+        return fail("C89 assert: LEAD_MD_SPEED > 3")
+    print("  LEAD_MD_SPEED %d (unit 128 → 3.0 px/frame cardinal)" % spd)
 
     init = fn_span(
         ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)"
     ) or ""
-    # variant 38 arm: apply_dir_88(e, dir, 3) — not 6.
-    arm38 = init.split("variant == 38")[1][:400] if "variant == 38" in init else ""
-    if "apply_dir_88(e, dir, 3)" not in arm38:
-        return fail("type 38 must keep Japan 8507 speed 3")
-    if "apply_dir_88(e, dir, 6)" in arm38:
-        return fail("do not double type 38 speed (this was DMA slowdown)")
-    print("  type 38: apply_dir_88 speed 3 (Japan +17=3)")
+    arm38 = init.split("variant == 38")[1][:500] if "variant == 38" in init else ""
+    if "apply_dir_88(e, dir, LEAD_MD_SPEED)" not in arm38:
+        return fail("type 38 must use LEAD_MD_SPEED (not Japan 3)")
+    if "apply_dir_88(e, dir, 3)" in arm38:
+        return fail("type 38 must not keep Japan speed 3 — MD feel is the ask")
+    arm37 = init.split("variant == 37")[1][:500] if "variant == 37" in init else ""
+    if "LEAD_MD_SPEED" not in arm37:
+        return fail("type 37 aimed disc must use LEAD_MD_SPEED")
+    xor = fn_span(ent, "static void apply_dir_88_xor(Slot *e, u8 dir)") or ""
+    if "LEAD_MD_SPEED" not in xor:
+        return fail("type 42/43 XOR must start from LEAD_MD_SPEED")
+    arm21 = init.split("variant == 21")[1][:400] if "variant == 21" in init else ""
+    if "apply_dir_88(e, dir, 4)" not in arm21:
+        return fail("type 21 must stay Japan speed 4")
+    print("  type 37/38/42/43: LEAD_MD_SPEED 6; type 21 stays 4")
 
     units = re.search(
         r"static const s16 k_unit_y\[16\] = \{\s*([^}]+)\}", ent, re.S
     )
     if not units or "128" not in units.group(1).split(",")[0]:
         return fail("k_unit_y[0] must stay mag 128 (4cf7 unit)")
-    print("  4cf7 unit mag 128 * speed 3 = 1.5 px/frame cardinal")
+    print("  4cf7 unit mag 128 * 6 = 3.0 px/frame cardinal")
 
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
     if drop.count("spawn_frag(") != 3 or ", 38)" not in drop:
         return fail("red box still fires 3× type 38")
-    print("  box×3: three type 38, speed 3 each")
+    print("  box×3: three type 38 at LEAD_MD_SPEED")
 
     up = fn_span(ent, "static void spr_upload_color(Slot *s)") or ""
     skip = re.search(
@@ -113,9 +115,8 @@ def main() -> int:
     print("  shot_vram_prepare: FRAME_LEAD pin share (3+ volley speed)")
 
     place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
-    if "share ? 0 : SPR_FLAG_AUTO_VRAM_ALLOC" not in place.replace(" ", "").replace(
-        "\n", ""
-    ) and "share ? 0 : SPR_FLAG_AUTO_VRAM_ALLOC" not in place:
+    compact = place.replace(" ", "").replace("\n", "")
+    if "share?0:SPR_FLAG_AUTO_VRAM_ALLOC" not in compact:
         return fail("lead share must addSprite without AUTO_VRAM (multiplex, no alloc/free)")
     if "if (share)" not in place or "shot_vram_point" not in place:
         return fail("lead share must point at the pin index")
@@ -160,18 +161,29 @@ def main() -> int:
 
     sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""
     if "shot_vram_own" not in sync or "ebullet_normal_lock" not in sync:
-        return fail("keep spr_sync_proj own-every-tick (poison was AUTO upload)")
-    print("  spr_sync_proj: own tiles so SPR_update cannot re-poison 15")
+        return fail("spr_sync_proj must still own unpinned NORMAL discs")
+    if "LEAD_WHITE_NIB" not in sync:
+        return fail("spr_sync_proj must skip own once the disc is on the pin")
+    print("  spr_sync_proj: own only until pin; no per-tick SGDK on shared discs")
 
-    asm = load_asm()
-    if asm:
-        if not re.search(r"LD\s+\(IX\+0x17\),\s*0x03\s*;\s*0x8507", asm, re.I):
-            return fail("zanac.asm 8507 is not speed 3")
-        print("  zanac.asm 8507: +17=3")
-    else:
-        print("  (zanac.asm not on this machine; C speed 3 locked)")
+    step = re.search(
+        r"e->variant == 21 \|\| e->variant == 37.*?e->variant == 45\).*?"
+        r"ebullet_apply_vis\(e\).*?if \(step_88_4898\(e\)\)",
+        ent,
+        re.S,
+    )
+    if not step:
+        return fail("21-group must still reach apply_vis (type 21 / HIGH / unpinned)")
+    if "LEAD_WHITE_NIB" not in step.group(0):
+        return fail("NORMAL pinned lead must skip apply_vis in the 21-group tick")
+    print("  tick: type 21 still apply_vis; NORMAL pin skips the choke")
 
-    print("ok: programmed speed matches MSX; 3+ slowness was #144 DMA, not half-vel")
+    if "LEAD_MD_SPEED" not in opth:
+        return fail("options.h must document LEAD_MD_SPEED")
+    if "FRAME_LEAD" not in opth:
+        return fail("options.h must keep FRAME_LEAD appearance lock")
+
+    print("ok: MD speed 6 + multiplex; type 21 / look unchanged")
     return 0
 
 

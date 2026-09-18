@@ -91,7 +91,9 @@
  * tiles. PAL2[15] and PAL2[3] stay fixed. Every lead disc shares /
  * multiplexes the exclusive FRAME_LEAD pin (one VRAM upload; later
  * discs only point at that tile index — no AUTO_VRAM, no per-shot
- * paint DMA). No VDP_allocateTiles. No per-tick rebuild.
+ * paint DMA). Travel speed is LEAD_MD_SPEED (6), not Japan type-38
+ * +17=3: MD 68000 feel, not MSX velocity. Type 21 stays speed 4.
+ * No VDP_allocateTiles. No per-tick rebuild.
  */
 #define BULLET_VIS_NORMAL       0
 #define BULLET_VIS_HIGH         1
