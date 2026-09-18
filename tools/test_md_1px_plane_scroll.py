@@ -115,8 +115,11 @@ def main() -> int:
         return fail("do not write VSRAM mid-display from bg_set_vscroll")
     if "s_vsram_b" not in bg or "& 0x3FF" not in bg:
         return fail("bg_set_vscroll must latch 10-bit VSRAM")
-    if "s_scroll_px + mode_y_off()" not in bg:
-        return fail("camera must stay -(scroll_px + y_off)")
+    if "mode_camera_off(s_scroll_px)" not in bg:
+        return fail("camera must stay -mode_camera_off (scroll_px + y_off)")
+    cam = fn_span(mode_c, "u16 mode_camera_off(u16 scroll_px)")
+    if not cam or "scroll_px + s_cur->y_off" not in cam:
+        return fail("mode_camera_off must stay scroll_px + y_off (no *224/192)")
 
     apply = fn_span(mapc, "void map_script_apply_vscroll(void)")
     if not apply:
@@ -147,8 +150,12 @@ def main() -> int:
     # Original layout: 256×192 + 16px letterbox, not stretched.
     if "y_off = 16" not in mode_c:
         return fail("Original y_off must stay 16 (do not stretch 192→224)")
-    if "playfield_h = 192" not in mode_c:
+    if "playfield_h = 192" not in mode_c and "playfield_h = MODE_MSX_H" not in mode_c:
         return fail("Original playfield must stay 192")
+    if "#define MODE_MSX_H" in (ROOT / "inc" / "mode_md.h").read_text(encoding="utf-8"):
+        mdh = (ROOT / "inc" / "mode_md.h").read_text(encoding="utf-8")
+        if not re.search(r"#define\s+MODE_MSX_H\s+192", mdh):
+            return fail("MODE_MSX_H must stay 192")
     if "VDP_setScreenWidth256" not in mode_c:
         return fail("Original must stay H32 256")
     if "VDP_setWindowHPos(TRUE, 12)" not in mode_c:

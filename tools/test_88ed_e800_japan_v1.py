@@ -70,7 +70,7 @@ def main() -> None:
     if "s_e800[(u8)((s_e714 + screen_row) % BOOT_ROWS)][col] = tid" not in MS:
         fail("punch_cell must persist wreckage at e800[(e714+Y/8)%24]")
     punch = MS.split("static void punch_cell(", 1)[1][:900]
-    if "VDP_setTileMapXY" not in punch:
+    if "VDP_setTileMapXY" not in punch and "stamp_vram(" not in punch:
         fail("punch_cell must also poke displayed NT")
     if "s_e800[s_e714][col] = tid" not in MS:
         fail("nt_put must persist wrap RAM even when vis>=24 (letterbox/wrap)")

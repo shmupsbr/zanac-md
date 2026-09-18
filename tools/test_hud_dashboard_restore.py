@@ -354,7 +354,7 @@ def main() -> int:
         else:
             print("  KEEP: ebullet variants stay in the shared tail")
 
-    if "16 - off" not in map_c:
+    if "16 - off" not in map_c and "mode_playfield_top() - off" not in map_c:
         fail("hidden_wrap_nt_at must be playfield top (screen Y 16 / SAT Y 0)")
         fails += 1
     elif re.search(r"u8 py = \(u8\)\(8 - off\)", map_c):

@@ -61,7 +61,7 @@ def main() -> int:
         return fail("space 0x20 must keep ROM CT (bg nibble 0)")
     if "VDP_fillTileMapRect(BG_B, blank, HUD_COL, 0, MODE_BAR_W, 32)" not in hud:
         return fail("HUD stripe must stay BG_B cols 24-31 only")
-    if "16 - off" not in map_c:
+    if "16 - off" not in map_c and "mode_playfield_top() - off" not in map_c:
         return fail("hidden_wrap_nt_at must be playfield top (screen Y 16)")
     if re.search(r"u8 py = \(u8\)\(8 - off\)", map_c):
         return fail("hidden_wrap Y=8 is the letterbox row (seam / south lens)")
