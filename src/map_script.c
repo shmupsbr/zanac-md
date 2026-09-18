@@ -155,7 +155,7 @@ static u16 s_peek_maprow;
  * assembles R+2. Both steps on leftover 4 was the empty-screen hitch. */
 static u8  s_peek_mid;
 static u8  s_idol_mid;
-/ * Two DMA_QUEUE HUD sources -- SGDK stores the pointer until vblank.
+/* Two DMA_QUEUE HUD sources -- SGDK stores the pointer until vblank.
  * Playfield is 24-col queued DMA (Japan 9a79 vblank OUT); HUD 24-31
  * restore is the other slice. Original pads dst[24-31] so the restore
  * cannot leak leftover charset. Zanac MD expands to 30 H40 cols in the

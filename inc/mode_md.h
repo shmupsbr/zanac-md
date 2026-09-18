@@ -1,5 +1,6 @@
-#ifndef MODE_MD_H
-#define MODE_MD_H
+/* Guard must not be MODE_MD_H: that name is the 224-px height constant. */
+#ifndef MODE_MD_H_INCLUDED
+#define MODE_MD_H_INCLUDED
 
 /*
  * ZANAC MD remaster de/para (display only).
