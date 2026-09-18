@@ -3,7 +3,8 @@
 
 Japan TMS nametable has no VSCROLL: 97e3 assembles one row on E711 carry.
 This port keeps that assemble, then slides the plane with E711>>5 so
-cruise E710=0x20 is 1px/tick.
+cruise E710=0x20 is 1px/tick. VSRAM is latched in the sim tick and
+written from VInt (vblank), not mid-display.
 
 Do not snap s_scroll_px to 8. KEEP wrap/peek/stamp binding from the
 post-#98 / msx-divergences baseline:
@@ -68,6 +69,9 @@ def main() -> int:
         return fail("do not snap s_scroll_px to 8px (that is TMS, not MD fine scroll)")
     if "s_e710 = 0x20" not in mapc:
         return fail("E710 start must stay 0x20 (1px/tick at E711>>5)")
+    rst = fn_span(mapc, "static void scroll_speed_reset(u8 target)")
+    if not rst or "s_e710 = 0x20" not in rst:
+        return fail("round boot must start E710=0x20 so the first frames are 1px/tick")
 
     bg = fn_span(mapc, "static void bg_set_vscroll(void)")
     if not bg:
@@ -76,6 +80,15 @@ def main() -> int:
         return fail("bg_set_vscroll must use raw s_scroll_px, not tile snap")
     if "s_scroll_px + mode_y_off()" not in bg:
         return fail("VSCROLL must be -(scroll_px + y_off)")
+    if "VDP_setVerticalScroll" in bg:
+        return fail("bg_set_vscroll must latch VSRAM, not write mid-display")
+    if "& 0x3FF" not in bg:
+        return fail("VSRAM latch must be 10-bit (0x3FF)")
+    if "void map_script_apply_vscroll(void)" not in mapc:
+        return fail("VInt must have map_script_apply_vscroll to commit VSRAM")
+    vint = (ROOT / "src" / "main.c").read_text(encoding="utf-8")
+    if "map_script_apply_vscroll()" not in vint:
+        return fail("vint callback must commit plane VSRAM in vblank")
 
     # Sub-tile leftover: E710=0x20 walks 1px for 8 frames then carry.
     px = [scroll_px(0, 0, (i * 0x20) & 0xFF) for i in range(8)]
