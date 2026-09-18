@@ -65,7 +65,7 @@ int main(bool hardReset)
          *  colour DMA when the queue is >=4096 B. Shot/lead/bar tiles
          *  share a VRAM bank after the first upload. Empty-screen
          *  leftover-4 no longer double-assembles (R+1 on leftover
-         *  2/3); identical wrap/peek NT rows skip the 24-col CPU OUT.
+         *  2/3); wrap/peek 24-col rows queue for vblank (not CPU OUT).
          *  Sim never skips a vblank. */
         SPR_update();
         SYS_doVBlankProcess();  /* one wait_one_frame 0x4306 */

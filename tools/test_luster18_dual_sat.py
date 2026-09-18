@@ -87,11 +87,14 @@ def main() -> int:
     print("  spr_sync: complement X = primary X")
 
     place = fn_span(ent, "static void marker_place(Slot *s, u16 frame)")
+    bind = fn_span(ent, "static void marker_bind(Slot *s, u16 frame)")
     if not place:
         return fail("marker_place not found")
-    if "mode_draw_x(s->x, s->sat_col)" not in place:
-        return fail("marker_place must use primary sat_col for draw X")
-    if "mode_draw_x(s->x, 0x81)" in place:
+    if not bind:
+        return fail("marker_bind (71f6 hardware SAT) not found")
+    if "mode_draw_x(s->x, s->sat_col)" not in bind:
+        return fail("marker_bind must use primary sat_col for draw X")
+    if "mode_draw_x(s->x, 0x81)" in place or "mode_draw_x(s->x, 0x81)" in bind:
         return fail("marker_place must not use a separate 0x81 EC path")
     print("  marker_place: same SAT X as primary")
 

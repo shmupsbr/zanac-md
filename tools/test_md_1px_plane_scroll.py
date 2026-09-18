@@ -125,6 +125,8 @@ def main() -> int:
         return fail("VInt apply must write VSRAM")
     if "s_vsram_arm" not in apply:
         return fail("title must be able to disarm VInt VSRAM writes")
+    if "s_vsram_b == s_vsram_last" not in apply:
+        return fail("VInt must skip unchanged VSRAM (base hold / warp freeze)")
 
     vint = fn_span(main_c, "static void vint_psg(void)")
     if not vint or "map_script_apply_vscroll()" not in vint:

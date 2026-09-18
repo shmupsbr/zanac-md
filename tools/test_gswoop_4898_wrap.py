@@ -344,10 +344,14 @@ def main() -> int:
             print("  KEEP: gswoop Y-then-X / BIT6 / XOR 0x06")
 
     spawn = fn_span(ent, "static void spawn_gswoop(Slot *e, u8 type)")
+    child = fn_span(ent, "static Slot *spawn_gswoop_pair_child(Slot *e)")
     if not spawn:
         fail("spawn_gswoop not found")
         fails += 1
-    elif "e->x = 0x30" not in spawn or "c->x = 0xC0" not in spawn:
+    elif "e->x = 0x30" not in spawn:
+        fail("spawn_gswoop must keep parent X=0x30")
+        fails += 1
+    elif not child or "c->x = 0xC0" not in child:
         fail("spawn_gswoop must keep parent X=0x30 child X=0xC0")
         fails += 1
     elif "e->bind = 0x0180" not in spawn or "e->dest = 0x0180" not in spawn:
@@ -356,10 +360,10 @@ def main() -> int:
     elif "e->y = 0xD0" not in spawn or "e->bind = 0xFF00" not in spawn:
         fail("type32 rise Y=0xD0 / Yvel FF00 was reverted")
         fails += 1
-    elif "c->kind = KIND_TRACKER" not in spawn:
+    elif "c->kind = KIND_TRACKER" not in child:
         fail("gswoop child must stay KIND_TRACKER")
         fails += 1
-    elif "c->dest = (type == 30) ? 0xFE80 : 0xFF00" not in spawn:
+    elif "c->dest = (type == 30) ? 0xFE80 : 0xFF00" not in child:
         fail("gswoop child Xvel FE80/FF00 was reverted")
         fails += 1
     else:

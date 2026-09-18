@@ -137,6 +137,7 @@ static u8  s_scroll_delta;      /* pixels advanced this frame */
 static u8  s_row_carry;         /* E700 bit 1: 97e3 ran this frame */
 static u16 s_scroll_base;       /* E702 after build_tile_screen; VSCROLL 0 */
 static u16 s_vsram_b;           /* 10-bit BG_B VSRAM, latched for VInt */
+static u16 s_vsram_last;        /* last word written; skip unchanged VInt */
 static u8  s_vsram_arm;         /* 1 = in-game; title must not overwrite */
 static u8  s_skip_precompute;   /* cmd 9 941b RET: this step does not 97e3 */
 static u8  s_ram_only;          /* boot: assemble E800 without poking VRAM */
@@ -153,8 +154,9 @@ static u16 s_peek_maprow;
 static u8  s_peek_mid;
 static u8  s_idol_mid;
 /* Two DMA_QUEUE HUD sources -- SGDK stores the pointer until vblank.
- * Playfield is 24-col CPU (Japan 9a79); only the HUD slice is queued.
- * Original pads dst[24-31] so the restore cannot leak leftover charset. */
+ * Playfield is 24-col queued DMA (Japan 9a79 vblank OUT); HUD 24-31
+ * restore is the other slice. Original pads dst[24-31] so the restore
+ * cannot leak leftover charset. */
 static u16 s_dma_row[2][MODE_H32_COLS];
 static u8  s_dma_flip;
 static TransferMethod s_row_tm = DMA_QUEUE;
@@ -699,9 +701,16 @@ static u8 tile_wrap_nt_at(u16 scroll_px)
  * left-edge blue notch. Do not invent shore tiles — write the 24-col
  * stream, first cell included.
  *
- * Gameplay writes those 24 with CPU (Japan's per-tile OUT) so SGDK
- * DMA_QUEUE cannot skip word 0. Boot uses DMA while the display is
- * off. HUD cols 24-31 still restore via tm (WINDOW 0x20 CT bg=0).
+ * The 24-col CPU OUT during the sim tick is the remaining carry
+ * soquinho: a VDP-port punch every 8px even with 1px VSRAM. Japan
+ * 9a79 copies E800 in vblank. Queue the 24-col row and flush with
+ * SAT/NT DMA after wait_one_frame. Boot still uses DMA while the
+ * display is off.
+ *
+ * SGDK DMA_QUEUE of a 32-col pad dropped dest word 0. Stay 24-col at
+ * x=0, then queue dst[0] again so a skipped first word cannot leave
+ * leftover 0x28 sky in playfield col 0. HUD cols 24-31 restore via
+ * tm (WINDOW 0x20 CT bg=0).
  */
 static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm)
 {
@@ -711,8 +720,7 @@ static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm)
 
     nt_y &= 31;
     /* Empty / repeating sky reprints the same 24 cells into the wrap
-     * slot. The 24-col CPU OUT is the carry hitch when nothing is on
-     * screen -- skip the VDP burst when s_nt already matches. Punches
+     * slot. Skip the VDP burst when s_nt already matches. Punches
      * update s_nt (nt_put / punch_cell), so a live 87e2/88ed still
      * mismatches and writes. */
     for (x = 0; x < PF_COLS; x++)
@@ -729,8 +737,12 @@ static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm)
         dst[x] = tile_attr(src[x]);
     }
     /* 9a79 B=0x18 at col 0. Do not expand to MODE_H32_COLS. */
-    play_tm = (tm == DMA_QUEUE) ? CPU : tm;
+    play_tm = tm;
     VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, PF_COLS, play_tm);
+    /* Queued 32-col pad dropped word 0. A 1-cell rewrite of dst[0]
+     * keeps playfield col 0 even if the 24-word burst skips it. */
+    if (tm == DMA_QUEUE)
+        VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, 1, DMA_QUEUE);
     if (mode_get() == MODE_ORIGINAL)
     {
         u16 blank = mode_letter_attr();
@@ -823,7 +835,12 @@ void map_script_apply_vscroll(void)
 {
     if (!s_vsram_arm)
         return;
+    /* Unchanged latch: skip the VSRAM port (base hold / warp freeze).
+     * Cruise still writes every tick because the 1px camera moves. */
+    if (s_vsram_b == s_vsram_last)
+        return;
     vsram_write_b(s_vsram_b);
+    s_vsram_last = s_vsram_b;
 }
 
 /* 97e3 scroll_precompute: DEC E714 (wrap 0->23), assemble once. */
@@ -986,7 +1003,9 @@ static void peek_next_row_at(u16 map_row, u16 wrap_px)
     /* wrap_px selects the playfield-top NT the next 1-8px of VSCROLL
      * will reveal. In-game wrap_px is scroll_px+8 so peek does not
      * overwrite this carry's 97e3 row. Boot uses DMA (display off);
-     * gameplay queues until commit_wrap. */
+     * gameplay queues until commit_wrap. Peek DMA stays after
+     * fire_pending so cmd 9 (skip_precompute) cannot stamp a 0x28
+     * sky line into wrap(scroll+8). */
     s_peek_nt = hidden_wrap_nt_at(wrap_px);
     if (s_row_tm != DMA_QUEUE)
         dma_nt_row(s_peek_nt, s_peek_line, s_row_tm);
@@ -1689,6 +1708,7 @@ static void bg_init(void)
     VDP_setHorizontalScroll(BG_B, 0);
     s_vsram_arm = 0;
     s_vsram_b = 0;
+    s_vsram_last = 0xFFFF;
     VDP_clearPlane(BG_B, TRUE);
     memset(s_nt, 0, sizeof(s_nt));
     bg_load_tiles();
@@ -1711,6 +1731,7 @@ void map_script_reset_scroll(void)
 {
     s_vsram_arm = 0;
     s_vsram_b = 0;
+    s_vsram_last = 0xFFFF;
     vsram_write_b(0);
     VDP_setHorizontalScroll(BG_A, 0);
     VDP_setHorizontalScroll(BG_B, 0);

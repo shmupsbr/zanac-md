@@ -632,6 +632,7 @@ static const u8 k_box_sat[30] = {
  * (that flicker). Occupancy: draw_x + width > 192, not only draw_x >= 192. */
 static s16 slot_draw_y(const Slot *s);
 static void marker_place(Slot *s, u16 frame);
+static void marker_bind(Slot *s, u16 frame);
 static void marker_kill(Slot *s);
 static void spr_detach(Slot *s);
 static int complement_frame_ok(u16 frame);
@@ -810,6 +811,18 @@ typedef struct {
     u16 index;
 } ShotBank;
 static ShotBank s_shot_bank[SHOT_BANK_N];
+/* 71f6 complements are static black tiles (no sat_col remap). Bank
+ * the first upload per FRAME_*_C and SPR_setVRAMTileIndex later
+ * mspr at that index. AUTO_VRAM per flyer was the random missing
+ * black: primary took the last tiles, addSprite NULL for the pair. */
+#define CCOMP_BANK_N  16
+typedef struct {
+    u8  used;
+    u8  frame;
+    u8  ntiles;
+    u16 index;
+} CCompBank;
+static CCompBank s_ccomp_bank[CCOMP_BANK_N];
 /* FRAME_LEAD discs (SAT 0x1C). Exclusive of type 21 pat 6.
  * WHITE = NORMAL 0x8F / nibble 15. HIGH = TYPE21_CRAM_NIB + 8659.
  * Tile count is the FRAME_LEAD tileset (SGDK BALANCED 8x8 = 1 tile).
@@ -1102,9 +1115,59 @@ static void shot_vram_reset(void)
      * VRAM_free; do not invent VDP_releaseTiles. Release the FRAME_LEAD
      * pin while its Sprite* is still valid (entity_release, before SPR_reset). */
     memset(s_shot_bank, 0, sizeof(s_shot_bank));
+    memset(s_ccomp_bank, 0, sizeof(s_ccomp_bank));
     s_lead7_white_ok = 0;
     s_lead7_high_ok = 0;
     lead7_pin_release();
+}
+
+static int ccomp_bank_lookup(u8 frame, u16 *out)
+{
+    u8 i;
+
+    for (i = 0; i < CCOMP_BANK_N; i++)
+    {
+        if (s_ccomp_bank[i].used && s_ccomp_bank[i].frame == frame)
+        {
+            *out = s_ccomp_bank[i].index;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Keep AUTO off so SPR_releaseSprite cannot VRAM_free tiles other
+ * 71f6 pairs still read. Same keep_banked contract as shots. */
+static void ccomp_bank_remember(Slot *s)
+{
+    u8 i;
+    u16 idx;
+    u8 ntiles;
+    Sprite *sp = s->mspr;
+
+    if (!sp || !sp->frame || !sp->frame->tileset)
+        return;
+    ntiles = (u8)sp->frame->tileset->numTile;
+    if (!ntiles)
+        return;
+    idx = (u16)(sp->attribut & TILE_INDEX_MASK);
+    for (i = 0; i < CCOMP_BANK_N; i++)
+    {
+        if (s_ccomp_bank[i].used && s_ccomp_bank[i].frame == s->mframe)
+            return;
+    }
+    for (i = 0; i < CCOMP_BANK_N; i++)
+    {
+        if (!s_ccomp_bank[i].used)
+        {
+            s_ccomp_bank[i].used = 1;
+            s_ccomp_bank[i].frame = s->mframe;
+            s_ccomp_bank[i].ntiles = ntiles;
+            s_ccomp_bank[i].index = idx;
+            shot_vram_keep_banked(sp);
+            return;
+        }
+    }
 }
 
 /* Proven paint_all-15: every nonzero body nibble is white. A (frame,15)
@@ -1336,20 +1399,31 @@ static void spr_sync(Slot *s)
 
     dx = mode_draw_x(s->x, s->sat_col);
     dy = slot_draw_y(s);
+    /* Japan 71f6 writes the complement SAT every handler tick. addSprite
+     * NULL (VRAM/slot) used to leave the coloured primary alone. Retry
+     * here; hide the body until the black SAT exists so the pair always
+     * appears together. Occupancy-only (pairdesc) never has a SAT name. */
+    if (s->marker && s->spr && !s->mspr && complement_frame_ok(s->mframe))
+        marker_bind(s, s->mframe);
     if (s->spr)
     {
+        int pair_ok = (!s->marker || !complement_frame_ok(s->mframe)
+                       || s->mspr);
+
         /* Depth is bound at spr_place / marker_place. Re-binding
          * every sync immediately sortSprite-inserts (Y-sort thrash).
          * SGDK 2.11 set-position already no-ops when x+0x80/y+0x80
          * match. */
         SPR_setPosition(s->spr, dx, dy);
-        spr_vis_playfield(s->spr, dx, dy, 1);
+        spr_vis_playfield(s->spr, dx, dy, pair_ok);
     }
     /* 71f6: SAT Y = parentY-0x11, X = parent X, color 0x81. Same SUB as
      * sprite_sat_write 0x48C0, so MD draw Y matches the primary (both skip
      * the hardware SAT offset). Later SAT index draws behind on TMS. */
     if (!s->mspr)
         return;
+    if (s->mvram_fr != s->mframe)
+        mspr_upload(s);
     /* 71f6 writes the parent SAT X (IX+02), then color 0x81 (EC).
      * Type 18 +04 is 0x8B (also EC), so hardware X is SAT-32 for both.
      * Recompute from 0x81 only when the primary already has bit7; if
@@ -1358,11 +1432,12 @@ static void spr_sync(Slot *s)
      * Do not add ship X+1 or ship Y+2 -- those mis-seat the green flyer. */
     mdx = dx;
     mdy = dy;
-        SPR_setPosition(s->mspr, mdx, mdy);
-    /* 71f6 always writes the complement SAT. Clip only this EC sprite's
+    SPR_setPosition(s->mspr, mdx, mdy);
+    /* Hide until complement tiles are the SAT name (not leftover SHOT).
+     * 71f6 always writes the complement SAT. Clip only this EC sprite's
      * own draw box. Do not hide it because the primary overlaps the HUD
      * or because a port line-budget is full -- that left colored halves. */
-    spr_vis_playfield(s->mspr, mdx, mdy, 1);
+    spr_vis_playfield(s->mspr, mdx, mdy, s->mvram_fr == s->mframe);
 }
 
 /* Shots / fire / ebullets: position + letterbox/HUD only. No complement,
@@ -1464,6 +1539,7 @@ static void mspr_upload(Slot *s)
     TileSet *ts;
     u16 nbytes;
     u16 vaddr;
+    u16 idx;
     const u8 *src;
 
     /* Complements have no sat_col remap. Queue the SAT-name tiles
@@ -1473,59 +1549,84 @@ static void mspr_upload(Slot *s)
     ts = sp->frame->tileset;
     if (!ts || !ts->numTile)
         return;
-    /* Complements are static black tiles. Re-DMA every marker_place /
-     * frame-cb blew the NTSC vblank when many 71f6 pairs were live. */
     if (s->mvram_fr == s->mframe)
         return;
+    /* Shared black tiles: point at the bank, no DMA. */
+    if (ccomp_bank_lookup(s->mframe, &idx))
+    {
+        shot_vram_point(sp, idx);
+        s->mvram_fr = s->mframe;
+        return;
+    }
     nbytes = (u16)(ts->numTile * 32);
     vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);
     src = (const u8 *)FAR_SAFE(ts->tiles, nbytes);
     DMA_queueDma(DMA_VRAM, (void *)src, vaddr, (u16)(nbytes / 2), 2);
     s->mvram_fr = s->mframe;
+    ccomp_bank_remember(s);
 }
 
-static void marker_place(Slot *s, u16 frame)
+/* Hardware complement only. Does not spr_sync (spr_sync calls this). */
+static void marker_bind(Slot *s, u16 frame)
 {
     s16 mdx;
     s16 mdy;
+    u16 idx;
+    u8 share;
 
-    if (!s->marker)
-        s->marker = 1;
     if (!complement_frame_ok(frame))
         return;
     s->mframe = (u8)frame;
-    /* Occupancy stays even if the hardware complement is withheld. */
     if (!s->spr)
         return;
-    /* Same SAT X / EC as the primary (71f6 parent X). */
     mdx = mode_draw_x(s->x, s->sat_col);
     mdy = slot_draw_y(s);
+    share = (u8)ccomp_bank_lookup((u8)frame, &idx);
+    if (!s->mspr)
+    {
+        /* 71f6 always writes the complement SAT. Do not refuse on a
+         * port hardware-sprite budget -- that left colored halves.
+         * Share banked tiles so AUTO_VRAM does not fail the pair. */
+        s->mvram_fr = 0xFF;
+        s->mspr = SPR_addSpriteEx(&spr_objs, mdx, mdy,
+                                  TILE_ATTR(PAL2, FALSE, FALSE, FALSE),
+                                  share ? 0 : SPR_FLAG_AUTO_VRAM_ALLOC);
         if (!s->mspr)
-        {
-            /* 71f6 always writes the complement SAT. Do not refuse on a
-             * port hardware-sprite budget -- that left colored halves. */
-            s->mvram_fr = 0xFF;
-            s->mspr = SPR_addSpriteEx(&spr_objs, mdx, mdy,
-                                      TILE_ATTR(PAL2, FALSE, FALSE, FALSE),
-                                      SPR_FLAG_AUTO_VRAM_ALLOC);
-            if (!s->mspr)
-                return;
-        /* addSprite starts at frame 0 (shot). Own tiles; hide until
-         * the complement SAT name is in VRAM. */
+            return;
         s->mspr->data = (u32)s;
         SPR_setFrameChangeCallback(s->mspr, mspr_frame_cb);
         s->mspr->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
         SPR_setVisibility(s->mspr, HIDDEN);
         SPR_setPriority(s->mspr, FALSE);
         SPR_setAnimAndFrame(s->mspr, 0, (s16)frame);
-        mspr_upload(s);
+        if (share)
+        {
+            shot_vram_point(s->mspr, idx);
+            s->mvram_fr = (u8)frame;
+        }
+        else
+            mspr_upload(s);
         sat_bind_depth(s->mspr, sat_depth_marker(s));
         sat_bind_depth(s->spr, sat_depth_primary(s));
-        spr_sync(s);
         return;
     }
     SPR_setAnimAndFrame(s->mspr, 0, (s16)frame);
-    mspr_upload(s);
+    if (share)
+    {
+        shot_vram_point(s->mspr, idx);
+        s->mvram_fr = (u8)frame;
+    }
+    else
+        mspr_upload(s);
+}
+
+static void marker_place(Slot *s, u16 frame)
+{
+    if (!s->marker)
+        s->marker = 1;
+    if (!complement_frame_ok(frame))
+        return;
+    marker_bind(s, frame);
     spr_sync(s);
 }
 
@@ -5369,6 +5470,42 @@ static void tracker_step(Slot *e)
     e->clock = (u8)((e->clock & (u8)~0x04) | ((e->sat_col & 0x06) ? 0x04 : 0));
 }
 
+static Slot *spawn_gswoop_pair_child(Slot *e)
+{
+    Slot *c;
+    u8 ei;
+    u8 type = e->variant;
+
+    /* Japan 71da CF -> entity_clear the parent. Port: retry while aux
+     * is 0xFF (no sibling yet) so DEGID_L never flies without DEGID_R.
+     * Do not respawn a killed right half. */
+    if (e->aux != 0xFF)
+        return NULL;
+    c = free_enemy();
+    if (!c)
+        return NULL;
+    ei = (u8)(e - s_en);
+    c->kind = KIND_TRACKER;
+    c->variant = (u8)(type + 1);
+    c->hp = 1;
+    c->ground = 0;
+    c->script = 0;
+    c->timer = 0;
+    c->vx = 0;
+    c->vy = 0;
+    c->x = 0xC0;
+    c->y = e->y;
+    c->bind = e->bind;
+    c->clock = e->clock;
+    c->dest = (type == 30) ? 0xFE80 : 0xFF00;
+    c->aux = ei;
+    c->alive = 1;
+    c->sat_col = 0x8F;
+    e->aux = (u8)(c - s_en);
+    spr_place(c, FRAME_DEGID_R);
+    return c;
+}
+
 static void spawn_gswoop(Slot *e, u8 type)
 {
     /* handler_type30_ground_swooper @ 7e9c.
@@ -5376,9 +5513,6 @@ static void spawn_gswoop(Slot *e, u8 type)
      * script=Xfrac, timer=Yfrac. clock low=+0c (1=Y,2=X); bit2=xor
      * phase; bit6=type32 sense; bit7=lock. aux=paired sibling (0xFF).
      * +03 SAT name 0xec (child 0xf0); +04=0x8f. */
-    Slot *c;
-    u8 ei;
-
     e->kind = KIND_GSWOOP;
     e->variant = type;
     e->hp = 1;
@@ -5391,7 +5525,6 @@ static void spawn_gswoop(Slot *e, u8 type)
     e->aux = 0xFF;
     e->clock = 0x01;        /* +0c = Y_motion */
     e->alive = 1;
-    ei = (u8)(e - s_en);
     e->sat_col = 0x8F;      /* +04; ^=0x06 @ 7f73 */
     if (type == 30)
     {
@@ -5410,31 +5543,8 @@ static void spawn_gswoop(Slot *e, u8 type)
 
     /* spawn_col_marker + LDIR pair: child type own+1 at X=0xC0.
      * Child is KIND_TRACKER (7f84), sat 0xf0 degid_right -- not stream pat51. */
-    c = free_enemy();
-    if (c)
-    {
-        u8 ci = (u8)(c - s_en);
-
-        c->kind = KIND_TRACKER;
-        c->variant = (u8)(type + 1);
-        c->hp = 1;
-        c->ground = 0;
-        c->script = 0;
-        c->timer = 0;
-        c->vx = 0;
-        c->vy = 0;
-        c->x = 0xC0;
-        c->y = e->y;
-        c->bind = e->bind;
-        c->clock = e->clock;
-        c->dest = (type == 30) ? 0xFE80 : 0xFF00;
-        c->aux = ei;
-        c->alive = 1;
-        c->sat_col = 0x8F;      /* +04; +03=0xf0 on MSX */
-        e->aux = ci;
-        spr_place(c, FRAME_DEGID_R); /* +03=0xf0 degid_right */
-    }
-    spr_place(e, FRAME_DEGID_L); /* +03=0xec degid_left */
+    if (spawn_gswoop_pair_child(e))
+        spr_place(e, FRAME_DEGID_L);
 }
 
 static void gswoop_step(Slot *e)
@@ -5446,6 +5556,12 @@ static void gswoop_step(Slot *e)
     u8 mode = (u8)(e->clock & 3);
     u8 past;
     Slot *sib = NULL;
+
+    if (e->aux == 0xFF)
+    {
+        if (spawn_gswoop_pair_child(e) && !e->spr)
+            spr_place(e, FRAME_DEGID_L);
+    }
 
     if (e->aux < ENEMY_SLOTS)
     {
