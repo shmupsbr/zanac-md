@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Bolinha travel speed + 68000 multiplex.
 
-#153 raised LEAD_MD_SPEED to 6 (3.0 px/f). Filipe: half that — 3
-(1.5 px/f cardinal). Appearance stays locked: FRAME_LEAD look,
+#154 set LEAD_MD_SPEED 3 (1.5 px/f cardinal). Filipe: +50%.
+Integer 4 is only +33%; LEAD_MD_SPEED 5 = 2.5 px/f (closest
+integer ≥ +50%). Appearance stays locked: FRAME_LEAD look,
 NORMAL white / HIGH cycle, type 21 always 8659. Multiplex stays.
 
-LEAD_MD_SPEED 3 = 128*3 = 1.5 px/frame cardinal (half of #153's 6).
+LEAD_MD_SPEED 5 = 128*5 = 2.5 px/frame cardinal.
 Type 21 stays Japan 4.
 
 Usage (from zanac-md):
@@ -51,13 +52,13 @@ def main() -> int:
     if not m:
         return fail("LEAD_MD_SPEED must name the lead travel speed")
     spd = int(m.group(1))
-    if spd != 3:
-        return fail("LEAD_MD_SPEED must be 3 (half of #153's 6)")
-    if "lead_md_faster_than_japan" in ent:
-        return fail("do not require LEAD_MD_SPEED > 3; expected is 3")
-    if "lead_md_speed_is_3" not in ent:
-        return fail("C89 assert: LEAD_MD_SPEED == 3")
-    print("  LEAD_MD_SPEED %d (unit 128 → 1.5 px/frame cardinal)" % spd)
+    if spd != 5:
+        return fail("LEAD_MD_SPEED must be 5 (closest integer ≥ +50% of #154's 3)")
+    if "lead_md_speed_is_3" in ent:
+        return fail("C89 assert must expect 5, not 3")
+    if "lead_md_speed_is_5" not in ent:
+        return fail("C89 assert: LEAD_MD_SPEED == 5")
+    print("  LEAD_MD_SPEED %d (unit 128 → 2.5 px/frame cardinal)" % spd)
 
     init = fn_span(
         ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)"
@@ -74,14 +75,14 @@ def main() -> int:
     arm21 = init.split("variant == 21")[1][:400] if "variant == 21" in init else ""
     if "apply_dir_88(e, dir, 4)" not in arm21:
         return fail("type 21 must stay Japan speed 4")
-    print("  type 37/38/42/43: LEAD_MD_SPEED 3; type 21 stays 4")
+    print("  type 37/38/42/43: LEAD_MD_SPEED 5; type 21 stays 4")
 
     units = re.search(
         r"static const s16 k_unit_y\[16\] = \{\s*([^}]+)\}", ent, re.S
     )
     if not units or "128" not in units.group(1).split(",")[0]:
         return fail("k_unit_y[0] must stay mag 128 (4cf7 unit)")
-    print("  4cf7 unit mag 128 * 3 = 1.5 px/frame cardinal")
+    print("  4cf7 unit mag 128 * 5 = 2.5 px/frame cardinal")
 
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
     if drop.count("spawn_frag(") != 3 or ", 38)" not in drop:
@@ -175,10 +176,12 @@ def main() -> int:
 
     if "LEAD_MD_SPEED" not in opth:
         return fail("options.h must document LEAD_MD_SPEED")
+    if "LEAD_MD_SPEED (5)" not in opth:
+        return fail("options.h must document LEAD_MD_SPEED (5)")
     if "FRAME_LEAD" not in opth:
         return fail("options.h must keep FRAME_LEAD appearance lock")
 
-    print("ok: LEAD_MD_SPEED 3 + multiplex; type 21 / look unchanged")
+    print("ok: LEAD_MD_SPEED 5 + multiplex; type 21 / look unchanged")
     return 0
 
 
