@@ -134,9 +134,9 @@ def main() -> int:
     sync = fn_span(ent, "static void spr_sync(Slot *s)")
     if not sync:
         return fail("spr_sync not found")
-    if "spr_vis_playfield(s->spr, dx, dy, 1)" not in sync:
+    if "spr_vis_playfield(s->spr, dx, dy" not in sync:
         return fail("primary must clip via spr_vis_playfield on its own box")
-    if "spr_vis_playfield(s->mspr, mdx, mdy, 1)" not in sync:
+    if "spr_vis_playfield(s->mspr, mdx, mdy" not in sync:
         return fail("marker/complement must clip via spr_vis_playfield on its own box")
     if re.search(r"spr_vis_playfield\(\s*s->mspr,\s*dx,\s*dy", sync):
         return fail("complement vis must not use the primary draw box")

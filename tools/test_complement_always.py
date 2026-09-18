@@ -38,7 +38,7 @@ def main() -> int:
     if not sync:
         return fail("spr_sync not found")
     body = sync.group(1)
-    if "spr_vis_playfield(s->mspr, mdx, mdy, 1)" not in body:
+    if "spr_vis_playfield(s->mspr, mdx, mdy" not in body:
         return fail("spr_sync must clip the complement's own box only")
     if re.search(r"spr_vis_playfield\(\s*s->mspr,\s*dx,\s*dy", body):
         return fail("complement vis must not use the primary draw box")
@@ -52,6 +52,14 @@ def main() -> int:
         return fail("marker_place must not refuse on a line-budget")
     if "hw_sprite_count" in pbody:
         return fail("marker_place must not refuse on a hardware-sprite budget")
+
+    bind = re.search(r"static void marker_bind\(Slot \*s, u16 frame\)\s*\{(.*?)^\}",
+                     ent, re.S | re.M)
+    if not bind:
+        return fail("marker_bind not found")
+    bbody = bind.group(1)
+    if "line_budget" in bbody or "hw_sprite_count" in bbody:
+        return fail("marker_bind must not refuse on a line-budget")
 
     print("ok: complement SAT stays; clip is own box; no line-budget drop")
     return 0

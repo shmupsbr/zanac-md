@@ -343,16 +343,17 @@ def main() -> int:
         print("  spawn_tracker: Y=0 bind=0x0200 +0c=1 807c dir")
 
     gs_spawn = fn_span(ent, "static void spawn_gswoop(Slot *e, u8 type)")
+    gs_child = fn_span(ent, "static Slot *spawn_gswoop_pair_child(Slot *e)")
     if not gs_spawn:
         fail("spawn_gswoop not found")
         fails += 1
-    elif "c->kind = KIND_TRACKER" not in gs_spawn:
+    elif not gs_child or "c->kind = KIND_TRACKER" not in gs_child:
         fail("gswoop child must stay KIND_TRACKER")
         fails += 1
     elif "e->y = 0xD0" not in gs_spawn or "e->bind = 0xFF00" not in gs_spawn:
         fail("type32 rise Y=0xD0 / Yvel FF00 was reverted")
         fails += 1
-    elif "c->dest = (type == 30) ? 0xFE80 : 0xFF00" not in gs_spawn:
+    elif "c->dest = (type == 30) ? 0xFE80 : 0xFF00" not in gs_child:
         fail("gswoop child Xvel FE80/FF00 was reverted")
         fails += 1
     else:

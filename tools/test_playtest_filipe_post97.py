@@ -14,8 +14,10 @@ then restored 24-31. The 32-word queued burst dropped word 0, so
 playfield col 0 kept leftover 0x28 sky. Invisible over water; at a
 coast it is the left-edge notch. Do not invent shore tiles.
 
-#97 KEEP: wrap DMA after entity (9a79 after 87e2/88ed). This PR keeps
-that handshake and writes the 24-col stream with CPU so col 0 lands.
+#97 KEEP: wrap DMA after entity (9a79 after 87e2/88ed). The 24-col
+stream is DMA_QUEUE'd for vblank (not CPU during the sim — that was
+the remaining carry soquinho). dst[0] is queued again so a skipped
+first word cannot leave leftover 0x28 sky in playfield col 0.
 
 KEEP: #91 peek only after real 97e3; #92 wrap(pre) RAW; #96 tile_wrap
 stamps; fire7; 964C; ship Y+2; no 0x28 punch; orb; 4898; ebullet; 4BDF;
@@ -94,8 +96,12 @@ def check_japan_24col_not_32queue() -> None:
         fail("playfield row must not DMA `width` (32 H32) — that skipped col 0")
     if "VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, PF_COLS, play_tm)" not in dma:
         fail("playfield must be 24 cols at x=0 (Japan 9a79 B=0x18)")
-    if "play_tm = (tm == DMA_QUEUE) ? CPU : tm" not in dma:
-        fail("queued wrap/peek must CPU the 24 playfield tiles so col 0 lands")
+    if "play_tm = (tm == DMA_QUEUE) ? CPU : tm" in dma:
+        fail("24-col CPU OUT during the sim is the remaining carry soquinho; queue for vblank")
+    if "play_tm = tm" not in dma:
+        fail("queued wrap/peek must DMA_QUEUE the 24 playfield tiles")
+    if "0, 1, DMA_QUEUE" not in dma:
+        fail("queue dst[0] again so a skipped first word cannot leave leftover 0x28 in col 0")
     # HUD restore KEEP (WINDOW punch-through), after the 24-col write.
     if "VDP_setTileMapDataRow(BG_B, dst + MODE_BAR_COL, nt_y" not in dma:
         fail("KEEP: restore HUD BG_B cols 24-31")
@@ -112,7 +118,7 @@ def check_japan_24col_not_32queue() -> None:
         fail("dma_nt_row must not playfield/letterbox fill (60fps)")
     if "do not invent" not in m.lower() and "do not invent" not in dma.lower():
         fail("coast stays Japan column streams; no invented art")
-    ok("9a79 24-col CPU playfield at x=0; HUD restore KEEP")
+    ok("9a79 24-col queued playfield at x=0; col0 rewrite; HUD restore KEEP")
 
 
 def check_e800_includes_col0() -> None:

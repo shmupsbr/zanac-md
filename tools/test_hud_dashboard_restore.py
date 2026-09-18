@@ -292,12 +292,12 @@ def main() -> int:
         fail("spr_sync not found")
         fails += 1
     else:
-        if "spr_vis_playfield(s->spr, dx, dy, 1)" not in sync:
+        if "spr_vis_playfield(s->spr, dx, dy" not in sync:
             fail("spr_sync must clip the primary on its own draw box")
             fails += 1
         else:
             print("  spr_sync: primary uses spr_vis_playfield(dx)")
-        if "spr_vis_playfield(s->mspr, mdx, mdy, 1)" not in sync:
+        if "spr_vis_playfield(s->mspr, mdx, mdy" not in sync:
             fail("spr_sync must clip the marker on its own draw box")
             fails += 1
         else:

@@ -233,10 +233,14 @@ def main() -> int:
         print("  KEEP: tracker_step child has no merge")
 
     spawn = fn_span(ent, "static void spawn_gswoop(Slot *e, u8 type)")
+    child = fn_span(ent, "static Slot *spawn_gswoop_pair_child(Slot *e)")
     if not spawn:
         fail("spawn_gswoop not found")
         fails += 1
-    elif "e->x = 0x30" not in spawn or "c->x = 0xC0" not in spawn:
+    elif "e->x = 0x30" not in spawn:
+        fail("spawn_gswoop must keep parent X=0x30")
+        fails += 1
+    elif not child or "c->x = 0xC0" not in child:
         fail("spawn_gswoop must keep parent X=0x30 child X=0xC0")
         fails += 1
     elif "e->bind = 0x0180" not in spawn or "e->dest = 0x0180" not in spawn:

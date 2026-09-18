@@ -164,6 +164,8 @@ def main() -> int:
     dma = fn_span(mp, "static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm)")
     if not dma:
         return fail("dma_nt_row not found")
+    if "play_tm = (tm == DMA_QUEUE) ? CPU : tm" in dma:
+        return fail("24-col CPU OUT during the sim is the remaining soquinho")
     if "s_nt[nt_y][x] != src[x]" not in dma:
         return fail("dma_nt_row must compare s_nt before the 24-col CPU OUT")
     if "if (x == PF_COLS)" not in dma and "x == PF_COLS" not in dma:
