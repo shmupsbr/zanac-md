@@ -1,142 +1,157 @@
-# Zanac MD — assets e o que podes fazer no Mega Drive
+﻿# Zanac MD — assets and what you can do on Mega Drive
 
-Guia prático para fechar a arte do modo **ZANAC MD**. Números alinhados com `inc/mode_md.h` e `res/resources.res` em `main` (após o cenário 1:1 centrado).
+Practical guide to finish art for **ZANAC MD** mode. Numbers match `inc/mode_md.h` and `res/resources.res` on `main` (after the centered 1:1 scenery fix).
 
-A simulação e o modo **MSX Enhanced** (`MODE_ORIGINAL`) não mudam. Este ficheiro descreve só o que podes redesenhar e como o hardware MD limita o pack.
+Simulation and **MSX Enhanced** (`MODE_ORIGINAL`) do not change. This file only describes what you can redraw and how Mega Drive hardware limits the pack.
+
+**Pixel grids** (every current graphic, labeled): see [`docs/asset-grids/`](asset-grids/).
+
+| Sheet | Contents |
+| --- | --- |
+| [`asset-grids/objs_grid.png`](asset-grids/objs_grid.png) | All 61 `FRAME_*` cells from `objs.png` (16×16), labeled |
+| [`asset-grids/objs_frames/`](asset-grids/objs_frames/) | Per-frame PNGs `00_SHOT.png` … `60_SMALL_STAR.png` (×4 nearest) |
+| [`asset-grids/ship_grid.png`](asset-grids/ship_grid.png) | Ship bank frames |
+| [`asset-grids/ship_frames/`](asset-grids/ship_frames/) | Per-frame ship PNGs |
+| [`asset-grids/charset_tiles_grid.png`](asset-grids/charset_tiles_grid.png) | `charset_tiles.bin` as 4×256 8×8 1bpp banks |
+| [`asset-grids/title_*.png`](asset-grids/) / `hud_zanac_md_x4.png` | Title and HUD sources scaled with nearest neighbor |
+
+Regenerate with `python tools/extract_asset_grids.py`.
+
+Note: many `*_C` frames in the current `objs.png` are **solid black** (opaque black silhouettes / placeholders). On the grid they appear as filled dark tiles so you can see which indices exist.
 
 ---
 
-## Objectivo
+## Goal
 
-- Fechar a arte do modo **ZANAC MD** **sem** level design novo.
-- **MSX Enhanced / Original não se mexe.** Os packs actuais de `res/sprites/` continuam a servir o Enhanced.
-- A simulação continua em espaço MSX **256×192** (eventos, spawns, SAT, E800 de 24 colunas, culls). Só o **desenho** MD muda: H40 320×224, sprites no sítio certo, tileset opcional depois.
+- Finish **ZANAC MD** art **without** new level design.
+- **Do not touch MSX Enhanced / Original.** Current `res/sprites/` packs keep serving Enhanced.
+- Simulation stays in MSX **256×192** space (events, spawns, SAT, 24-column E800, culls). Only **MD drawing** changes: H40 320×224, sprites in the right place, optional tileset later.
 
-Fonte de verdade no código: `inc/mode_md.h` (de/para e constantes), `src/mode.c` (`mode_draw_x` / `mode_draw_y` / `mode_map_dest_cols`), `res/resources.res` (o que o ROM carrega hoje).
+Code source of truth: `inc/mode_md.h` (transform + constants), `src/mode.c` (`mode_draw_x` / `mode_draw_y` / `mode_map_dest_cols`), `res/resources.res` (what the ROM loads today).
 
 ---
 
-## Ecrã
+## Screen
 
 | | MSX Enhanced | Zanac MD |
 | --- | --- | --- |
-| Playfield | 256×192 + HUD à direita (cols 24–31) + letterbox 16px cima/baixo | 320×224 H40 (`MODE_MD_W` × `MODE_MD_H`) |
-| Simulação | 256×192 | **igual** — `playfield_w/h` ficam 256×192 |
-| Mapa NT | 24 cols de playfield | 24 cols **1:1** centradas (`MODE_MD_X0 = 8`; dest = 8 + col MSX); gutters 0–7 e 32–39 = céu charset **0x28** |
-| Plane | H32 (32 de largo) | **64-wide** (`MODE_PLANE_COLS`, `VDP_setPlaneSize(64, 32, TRUE)`) — obrigatório em H40 |
-| `y_off` | 16 (letterbox) | 0 (1:1 com a grelha 8px) |
-| Window | HUD direita | desligada (`VDP_setWindowOff`) |
+| Playfield | 256×192 + right HUD (cols 24–31) + 16px letterbox top/bottom | 320×224 H40 (`MODE_MD_W` × `MODE_MD_H`) |
+| Simulation | 256×192 | **same** — `playfield_w/h` stay 256×192 |
+| Map NT | 24 playfield cols | 24 cols **1:1** centered (`MODE_MD_X0 = 8`; dest = 8 + MSX col); gutters 0–7 and 32–39 = sky charset **0x28** |
+| Plane | H32 (32 wide) | **64-wide** (`MODE_PLANE_COLS`, `VDP_setPlaneSize(64, 32, TRUE)`) — required in H40 |
+| `y_off` | 16 (letterbox) | 0 (1:1 with the 8px grid) |
+| Window | right HUD | off (`VDP_setWindowOff`) |
 
-Um plano de 32 colunas em H40 enrola as cols 32–39 sobre 0–7: o fill das gutters pinta o lado esquerdo do estágio e as 8 colunas da direita repetem a esquerda. Por isso o modo MD usa plano de 64.
+A 32-column plane in H40 wraps cols 32–39 onto 0–7: gutter fill paints the left side of the stage and the right 8 columns repeat the left. That is why MD mode uses a 64-wide plane.
 
-Não duplicar colunas 24→30. Isso alongava o cenário (lixo repetido). Cada coluna MSX ocupa **uma** coluna H40, centrada.
+Do not duplicate columns 24→30. That stretched the scenery (repeated garbage). Each MSX column occupies **one** H40 column, centered.
 
 ---
 
-## De/para posição
+## Position transform
 
-A colisão continua em SAT vs SAT. Só o **desenho** passa por `mode_draw_x` / `mode_draw_y`.
+Collision stays SAT vs SAT. Only **drawing** goes through `mode_draw_x` / `mode_draw_y`.
 
 ### X (sprites)
 
-1. Aplicar **Early Clock** (bit 7 da cor SAT): hardware TMS desenha em `SAT_X − 32`.
-2. Depois escalar **×320/256** (×5/4).
+1. Apply **Early Clock** (SAT color bit 7): TMS hardware draws at `SAT_X − 32`.
+2. Then scale **×320/256** (×5/4).
 
-Exemplo (nave): SAT `0x78` com EC (`0x8F`) → visual MSX **88** → MD **110**.
+Example (ship): SAT `0x78` with EC (`0x8F`) → MSX visual **88** → MD **110**.
 
 ```
 x_md ≈ x_msx * 320 / 256
 MSX SAT X=0x78 EC → 88 → MD 110
 ```
 
-### Y (sprites e mapa)
+### Y (sprites and map)
 
-**1:1** com a grelha de 8px. `y_off` MD = 0.
+**1:1** with the 8px grid. MD `y_off` = 0.
 
-Não fazer ×224/192 no mapa. Isso + duplicar linhas partia o cenário a meio do ecrã (filas do wrap saltadas, overwrite de células vivas). E800 / wrap / peek / VSCROLL ficam na grelha Original de 24 linhas × 8px.
+Do not apply ×224/192 on the map. That plus row duplication split the scenery mid-screen (wrap rows skipped, live cells overwritten). E800 / wrap / peek / VSCROLL stay on the Original 24-row × 8px grid.
 
 ---
 
-## De/para tamanho sprite
+## Sprite size transform
 
-A arte actual ainda é placeholder MSX 16×16 (`SPRITE … 2 2` em `resources.res`). O pack MD deve ocupar ~a mesma fracção de ecrã e **snap** a células 8×8 (SGDK 1–4 tiles). Sem escala em runtime.
+Current art is still MSX 16×16 placeholders (`SPRITE … 2 2` in `resources.res`). The MD pack should occupy ~the same screen fraction and **snap** to 8×8 cells (SGDK 1–4 tiles). No runtime scale.
 
-| MSX E×F | Exacto (C/A , D/B) | Snap sugerido (tiles 8×8) |
+| MSX E×F | Exact (C/A , D/B) | Suggested snap (8×8 tiles) |
 | --- | --- | --- |
-| 16×16 | 20×18.67 | **24×16** (3×2) ou **24×24** (3×3) |
+| 16×16 | 20×18.67 | **24×16** (3×2) or **24×24** (3×3) |
 | 16×8 | 20×9.33 | **24×8** (3×1) |
-| 8×8 | 10×9.33 | **16×8** (2×1) ou **8×8** (1×1) |
+| 8×8 | 10×9.33 | **16×8** (2×1) or **8×8** (1×1) |
 | 8×16 | 10×18.67 | **16×16** (2×2) |
 
-Constantes: `MODE_MD_SPR_W_EXACT 20`, `MODE_MD_SPR_H_EXACT 18`, snap placeholder `24×16`.
+Constants: `MODE_MD_SPR_W_EXACT 20`, `MODE_MD_SPR_H_EXACT 18`, placeholder snap `24×16`.
 
-### Nave (ship bank)
+### Ship bank
 
-Hoje `res/sprites/ship.png` é **32×16**: dois frames 16×16 (pat 14 branco + pat 15 preto). Enhanced desenha os dois (preto no mesmo X, Y+2).
+Today `res/sprites/ship.png` is **32×16**: two 16×16 frames (pat 14 white + pat 15 black). Enhanced draws both (black at same X, Y+2).
 
-Pack MD: **32×32** (4×4) ou o snap da tabela (24×16 / 24×24). Plano antigo de frames: **neutro + 2 tilt à direita**; no MD usa **flip horizontal** para a esquerda. Não precisas de 2 tilt à esquerda no sheet.
-
----
-
-## Limites Mega Drive (o que podes usar)
-
-- **80 sprites/frame** de hardware; **~20 por scanline** em H40 (16 em H32). Cuidado com chuva de tiros / bolinhas: o 21.º sprite na linha cai.
-- Sprites em células **8×8** até **4×4 tiles (32×32)**. SGDK `SpriteDefinition` (`SPRITE name "…" W H` em tiles 1–4).
-- **4 paletas × 16 cores** (CRAM). Índice **0 é transparente** nos sprites. Um sprite = uma paleta.
-- Planos **A/B + window**; scroll **por pixel** (já usamos: VSCROLL do mapa + HSCROLL). MD desliga a window; Enhanced usa-a para o HUD.
-- **VRAM ~64KB** partilhada entre tiles, mapas e sprites. Packs MD grandes precisam de bank / não carregar tudo de uma vez.
-- **Sem `VDP_allocateTiles` para scale em runtime** — o SGDK 2.11 deste projecto nem expõe isso. Arte **pré-sized** no PNG; o ROM só faz upload.
-
-Complementos MSX (`_C`, segundo SAT preto) no Enhanced são um segundo sprite. No pack MD podes **fundir** o preto no mesmo 4bpp (poupa SAT e scanline) — RetroDev liga isso; tu redesenha o par na mesma folha até lá.
+MD pack: **32×32** (4×4) or the table snap (24×16 / 24×24). Old frame plan: **neutral + 2 tilt right**; on MD use **horizontal flip** for left. You do not need 2 tilt-left frames on the sheet.
 
 ---
 
-## Ficheiros actuais (editares estes / clones MD)
+## Mega Drive limits (what you can use)
 
-`resources.res` hoje aponta **os dois modos** para os mesmos `spr_ship` / `spr_objs` (células 16×16). O pack MD entra por paths **novos** (ver Workflow); o Enhanced fica com estes.
+- **80 sprites/frame** hardware; **~20 per scanline** in H40 (16 in H32). Watch bullet rain / discs: the 21st sprite on a line drops.
+- Sprites in **8×8** cells up to **4×4 tiles (32×32)**. SGDK `SpriteDefinition` (`SPRITE name "…" W H` in tiles 1–4).
+- **4 palettes × 16 colors** (CRAM). Index **0 is transparent** on sprites. One sprite = one palette.
+- Planes **A/B + window**; scroll **per pixel** (already used: map VSCROLL + HSCROLL). MD turns the window off; Enhanced uses it for the HUD.
+- **VRAM ~64KB** shared by tiles, maps, and sprites. Large MD packs need banking / do not load everything at once.
+- **No `VDP_allocateTiles` for runtime scale** — this project's SGDK 2.11 does not expose that. Art is **pre-sized** in the PNG; the ROM only uploads.
 
-| Ficheiro | Agora | Função | Acção MD |
+MSX complements (`_C`, second black SAT) in Enhanced are a second sprite. In the MD pack you can **bake** black into the same 4bpp (saves SAT and scanline) — RetroDev wires that; until then redraw the pair on the same sheet.
+
+---
+
+## Current files (edit these / MD clones)
+
+`resources.res` today points **both modes** at the same `spr_ship` / `spr_objs` (16×16 cells). The MD pack enters via **new** paths (see Workflow); Enhanced keeps these.
+
+| File | Now | Role | MD action |
 | --- | --- | --- | --- |
-| `res/sprites/objs.png` | **976×16** (61 frames × 16×16). `SPRITE spr_objs … 2 2` | inimigos / tiros / FX | Redesenhar pack MD no snap da tabela. **Não tocar** neste pack Original se o MD for um clone separado |
-| `res/sprites/ship.png` | **32×16** (2 frames × 16×16). `SPRITE spr_ship … 2 2` | nave (pat 14 + compl 15) | Pack MD 32×32 ou snap da tabela |
-| `res/charset_tiles.bin` + `charset_ct.bin` | charset MSX (256 tiles 4bpp + CT) | tiles do cenário | Tileset MD **opcional depois**; o cenário hoje é **1:1 tiles MSX centrados** |
-| `res/map_blob.bin` | mapa / scripts | level | **Não redesenhar o level** — só um tileset novo, se houver |
-| `res/hud_zanac_md.png` | **48×16** (preview; não está no `.res`) | logo HUD MD (`tools/build_hud_logo.py` → `hud_logo.c`) | Podes retocar |
-| `res/title_*.png` | vários (ver abaixo) | title | Retocar OK |
-| `res/sound_blob.bin` | 27 eventos AY | som | Depois (XGM/PCM); Enhanced fica no interpretador PSG |
+| `res/sprites/objs.png` | **976×16** (61 frames × 16×16). `SPRITE spr_objs … 2 2` | enemies / shots / FX | Redraw MD pack at table snap. **Do not overwrite** this Original pack if MD is a separate clone |
+| `res/sprites/ship.png` | **32×16** (2 frames × 16×16). `SPRITE spr_ship … 2 2` | ship (pat 14 + compl 15) | MD pack 32×32 or table snap |
+| `res/charset_tiles.bin` + `charset_ct.bin` | MSX charset (256 4bpp tiles + CT) | scenery tiles | MD tileset **optional later**; scenery today is **1:1 centered MSX tiles** |
+| `res/map_blob.bin` | map / scripts | level | **Do not redesign the level** — only a new tileset, if any |
+| `res/hud_zanac_md.png` | **48×16** (preview; not in `.res`) | MD HUD logo (`tools/build_hud_logo.py` → `hud_logo.c`) | Safe to retouch |
+| `res/title_*.png` | several (below) | title | Retouch OK |
+| `res/sound_blob.bin` | 27 AY events | sound | Later (XGM/PCM); Enhanced stays on the PSG interpreter |
 
-Title no disco (retocar OK):
+Title on disk (retouch OK):
 
-| Ficheiro | Tamanho | No `resources.res`? |
+| File | Size | In `resources.res`? |
 | --- | --- | --- |
-| `res/title_zanac.png` | 224×56 | sim — `IMAGE title_zanac` |
-| `res/title_mdmark.png` | 72×40 | sim — `IMAGE title_mdmark` |
-| `res/title_logo.png` | 144×40 | fonte / preview |
-| `res/title_md_logo.png` | 224×80 | fonte do logo |
-| `res/title_md_source.png` / `title_md_source_old.png` | fontes | não ligar directo |
+| `res/title_zanac.png` | 224×56 | yes — `IMAGE title_zanac` |
+| `res/title_mdmark.png` | 72×40 | yes — `IMAGE title_mdmark` |
+| `res/title_logo.png` | 144×40 | source / preview |
+| `res/title_md_logo.png` | 224×80 | logo source |
+| `res/title_md_source.png` / `title_md_source_old.png` | sources | do not wire directly |
 
-`logo_tiles.bin` e `bg_late.bin` são overlays MSX do charset (title / fases tardias). Não são o mapa. Não redesenhes `map_blob.bin`.
+`logo_tiles.bin` and `bg_late.bin` are MSX charset overlays (title / late stages). They are not the map. Do not redesign `map_blob.bin`.
 
 ---
 
-## Frames em objs (lista `FRAME_*` principais)
+## Frames in objs (main `FRAME_*` list)
 
-Definição em `src/entity.c`. `FRAME_N = 61`. O strip é horizontal: frame *i* = pixels `[i*16 .. i*16+16) × 16`.
+Defined in `src/entity.c`. `FRAME_N = 61`. Strip is horizontal: frame *i* = pixels `[i*16 .. i*16+16) × 16`.
 
-| Idx | `FRAME_*` | Notas |
+| Idx | `FRAME_*` | Notes |
 | ---: | --- | --- |
-| 0 | `SHOT` | tiro nível 0–1 |
+| 0 | `SHOT` | shot level 0–1 |
 | 1 | `DUSTER` | + `DUSTER_C` (26) |
 | 2 | `TERUZO` | + `TERUZO_C` (27) |
 | 3 | `LUSTER` | Luster B; + `LUSTER_C` (29) |
 | 4 | `BOX` | + `BOX_C` (28) |
 | 5 | `CHIP` | power chip / type 83 |
-| 6 | `LEAD` | bolinha / projéctil pequeno |
+| 6 | `LEAD` | small disc / bolinha |
 | 7 | `SIG` | |
-| 8 | `SHOT_D` | tiro duplo |
-| 9 | `SHOT_T` | tiro triplo |
-| 10 | `FIRE` | alvo fire 0 |
-| 11 | `CIRCLE` | círculo grande |
+| 8 | `SHOT_D` | double shot |
+| 9 | `SHOT_T` | triple shot |
+| 10 | `FIRE` | fire-0 target |
+| 11 | `CIRCLE` | large circle |
 | 12 | `COMET` | |
 | 13–15 | `DEGID_L` / `DEGID_R` / `DEGID` | |
 | 16–20 | `VEYBAR_0` .. `VEYBAR_4` | + `VEYBAR_C0` .. `C4` (21–25) |
@@ -159,36 +174,36 @@ Definição em `src/entity.c`. `FRAME_N = 61`. O strip é horizontal: frame *i* 
 | 55 | `UMBER_B` | + `UMBER_B_C` (56) |
 | 59 | `SNOW` | fire 3/4 |
 | 60 | `SMALL_STAR` | |
-| 61 | `FRAME_N` | contagem, não é um gráfico |
+| 61 | `FRAME_N` | count only, not art |
 
-Lista curta: `SHOT`, `DUSTER(+C)`, `TERUZO(+C)`, `LUSTER(+C)`, `BOX(+C)`, `CHIP`, `LEAD`, `SIG`, `SHOT_D/T`, `FIRE`, `CIRCLE`, `COMET`, `DEGID_L/R/DEGID`, `VEYBAR_0..4` + `C0..`, `UMBER(+C)`, `STEALTH(+C)`, `SPINNER_0..3` + `C`, `SART(+C)`, `PLANE(+C)`, `LOGA(+C/B/D)`, `BOLT`, `LIGHT_BAR`, `SIG_TRIPLE/DOUBLE`, `MED_CIRCLE`, `LUSTER_A(+C)`, `UMBER_B(+C)`, `SNOW`, `SMALL_STAR`. **`FRAME_N = 61`.**
+Short list: `SHOT`, `DUSTER(+C)`, `TERUZO(+C)`, `LUSTER(+C)`, `BOX(+C)`, `CHIP`, `LEAD`, `SIG`, `SHOT_D/T`, `FIRE`, `CIRCLE`, `COMET`, `DEGID_L/R/DEGID`, `VEYBAR_0..4` + `C0..`, `UMBER(+C)`, `STEALTH(+C)`, `SPINNER_0..3` + `C`, `SART(+C)`, `PLANE(+C)`, `LOGA(+C/B/D)`, `BOLT`, `LIGHT_BAR`, `SIG_TRIPLE/DOUBLE`, `MED_CIRCLE`, `LUSTER_A(+C)`, `UMBER_B(+C)`, `SNOW`, `SMALL_STAR`. **`FRAME_N = 61`.**
 
-Muitos voadores = par **colorido + preto** (`_C`). Redesenhar **os dois** (mesmo que o MD depois os funda num 4bpp).
+Many flyers = **color + black** pair (`_C`). Redraw **both** (even if MD later bakes them into one 4bpp sprite).
 
 ---
 
 ## Workflow
 
-1. Copiar/criar `res/sprites/md/` (ou um sheet MD) **sem partir** os paths Original (`res/sprites/ship.png`, `res/sprites/objs.png`).
-2. Desenhar na **grelha 8×8**, PNG indexado, **paleta índice 0 = transparente**.
-3. Avisar o RetroDev para ligar o pack **só** no modo `MODE_ZANAC_MD` (`ModeAssets` / `mode_init`). Linhas novas no `resources.res` (`SPRITE spr_md_ship` / `spr_md_objs`, `W H` em tiles).
-4. Enhanced continua com `objs` / `ship` actuais.
+1. Copy/create `res/sprites/md/` (or an MD sheet) **without breaking** Original paths (`res/sprites/ship.png`, `res/sprites/objs.png`).
+2. Draw on the **8×8 grid**, indexed PNG, **palette index 0 = transparent**.
+3. Tell RetroDev to wire the pack **only** in `MODE_ZANAC_MD` (`ModeAssets` / `mode_init`). New lines in `resources.res` (`SPRITE spr_md_ship` / `spr_md_objs`, `W H` in tiles).
+4. Enhanced keeps current `objs` / `ship`.
 
-Quando o PNG MD existir, a linha SGDK é do género:
+When the MD PNG exists, the SGDK lines look like:
 
 ```
 SPRITE spr_md_ship "sprites/md/ship.png" 3 2 NONE 0
 SPRITE spr_md_objs "sprites/md/objs.png" 3 2 NONE 0
 ```
 
-(`3 2` = 24×16 se fores no snap 16×16→24×16. Ajusta W H ao tamanho real.)
+(`3 2` = 24×16 if you take the 16×16→24×16 snap. Adjust W H to the real size.)
 
 ---
 
-## Fora de âmbito agora
+## Out of scope for now
 
 - **Aleste 2**
-- Mudar **MSX Enhanced** (lógica, sprites, charset, mapa)
-- **Level design novo** (`map_blob.bin` / scripts de ronda)
+- Changing **MSX Enhanced** (logic, sprites, charset, map)
+- **New level design** (`map_blob.bin` / round scripts)
 
-Tileset MD do cenário pode vir depois; até lá o modo MD mostra os tiles MSX 1:1, centrados, com céu 0x28 nas gutters.
+An MD scenery tileset can come later; until then MD mode shows MSX tiles 1:1, centered, with sky 0x28 in the gutters.
