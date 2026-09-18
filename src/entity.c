@@ -235,7 +235,7 @@
  *           4898 u8 wrap-cull Y>=0xD0 / X>=0xD1 (no s32 X).
  *   37      lead_bullet 84dd/84e3: +0c=3 +17=3 Japan, player_pos_snapshot 4c8b
  *           (= aim_4c91 + set_velocity_from_dir 8.8). Port: LEAD_MD_SPEED
- *           (6), not Japan 3 — MD feel after #152 still-slow playtest.
+ *           (3), half of #153's 6.
  *           84f6 SET 7 / 84fa RET (no 4898). Armed 84fb CALL 4898 / 44a6.
  *           Port: dest/bind/script/timer; apply_dir_88; skip first step;
  *           then 4898 u8 Y>=0xD0/X>=0xD1.
@@ -257,8 +257,8 @@
  *           Child of guns 46-55 / type 85-86. Not in spawn_type_list 0xBECC;
  *           stream path (is_port_type) uses 71c5 + leftover +0x1a=0.
  *   38      burst_fragment 8507: Japan +0x17=3, dir=+0x1a&0x0F, set_vel 8.8
- *           (42/43 path sans XOR). Port: LEAD_MD_SPEED 6 (2× Japan 1.5 px/f
- *           → 3.0 px/f). 8520 SET 7 / 8524 RET (no 4898). Armed JR 84fb.
+ *           (42/43 path sans XOR). Port: LEAD_MD_SPEED 3 (half of #153's 6;
+ *           1.5 px/f). 8520 SET 7 / 8524 RET (no 4898). Armed JR 84fb.
  *           Port: skip first step; then 4898 u8 wrap-cull.
  *   41      pair_fragment 852f: child of umber-8 / swoop-29. Not in 0xBECC.
  *           Init 4cf7 speed 2, LDIR +08..+0b -> +1c..+1f, +17=4, RET 857e
@@ -363,20 +363,18 @@
  * sat_col, or colour rules. Type 21 stays on its own pat-6 tiles.
  *
  * #152 multiplex (one pin DMA; later discs only point) removed the
- * per-shot AUTO_VRAM/paint hitch. Filipe still called volleys
- * muito lento: remaining slowness is raw vel (Japan +17=3 is
- * 1.5 px/frame) plus leftover per-tick SGDK own/apply_vis.
- * This is Mega Drive (MC68000), not MSX — LEAD_MD_SPEED raises
- * travel above type-38 speed 3. Appearance is locked: do not
- * change FRAME_LEAD art, nibble paint, sat_col, or colour rules.
- * Type 21 / fire 7 must not DMA onto the pin span. */
+ * per-shot AUTO_VRAM/paint hitch. #153 raised LEAD_MD_SPEED to 6
+ * (3.0 px/f). Filipe: half that — LEAD_MD_SPEED 3 (1.5 px/f).
+ * Appearance is locked: do not change FRAME_LEAD art, nibble paint,
+ * sat_col, or colour rules. Type 21 / fire 7 must not DMA onto
+ * the pin span. */
 #define LEAD_PACKED_NIB     4   /* SGDK FRAME_LEAD pixels; never 8659 */
 #define LEAD_WHITE_NIB     15   /* NORMAL Japan 0x8F bake; never walked */
-/* Japan 8507 +17=3 → 128*3 = 1.5 px/f cardinal. MD uses 6 → 3.0 px/f
- * (2× Japan). Snappy on 60fps without matching player 0xC2 (12 px/f).
- * Type 21 stays 4; type 45 stays (R&1)+2; type 41 keeps 2+4. */
-#define LEAD_MD_SPEED       6
-typedef char lead_md_faster_than_japan[(LEAD_MD_SPEED > 3) ? 1 : -1];
+/* Japan 8507 +17=3 → 128*3 = 1.5 px/f cardinal. #153 used 6 → 3.0 px/f;
+ * now half of that: 3 → 1.5 px/f. Type 21 stays 4; type 45 stays
+ * (R&1)+2; type 41 keeps 2+4. */
+#define LEAD_MD_SPEED       3
+typedef char lead_md_speed_is_3[(LEAD_MD_SPEED == 3) ? 1 : -1];
 typedef char lead_md_under_player_c2[(LEAD_MD_SPEED < 24) ? 1 : -1];
 #define FLYER_GREEN_NIB     3   /* type 44 / veybar 22/23 sat_col 0x83 */
 #define TYPE21_CRAM_NIB     5   /* type 21 / HIGH 8659; not flyer 3 */
@@ -4799,7 +4797,7 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     {
         /* handler_type37 84e3: Japan +0x17=3; player_pos_snapshot 4c8b
          * (= aim_4c91 then set_velocity_from_dir). Port: LEAD_MD_SPEED
-         * (MD feel; not MSX 1.5 px/f). No XOR. Type 42 CALL 84e3 then
+         * (3; half of #153's 6). No XOR. Type 42 CALL 84e3 then
          * XOR — keep apply_dir_88_xor below. */
         apply_dir_88(e, aim_4c91(x, y), LEAD_MD_SPEED);
     }
@@ -4837,7 +4835,7 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     {
         /* handler_type38_burst_fragment 0x8507:
          * Japan +0x17=3; dir=+0x1a&0x0F; set_velocity_from_dir (8.8).
-         * Port: LEAD_MD_SPEED 6 (3.0 px/f cardinal). */
+         * Port: LEAD_MD_SPEED 3 (1.5 px/f cardinal; half of #153). */
         apply_dir_88(e, dir, LEAD_MD_SPEED);
     }
     else if (variant == 21)

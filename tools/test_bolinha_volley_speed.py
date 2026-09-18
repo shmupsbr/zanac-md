@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Bolinha MD speed + 68000 multiplex.
+"""Bolinha travel speed + 68000 multiplex.
 
-Filipe after #152 (main tip cd22ef7): appearance locked, still muito
-lento. Product direction is explicit — this is Mega Drive (MC68000),
-not MSX. Two levers:
+#153 raised LEAD_MD_SPEED to 6 (3.0 px/f). Filipe: half that — 3
+(1.5 px/f cardinal). Appearance stays locked: FRAME_LEAD look,
+NORMAL white / HIGH cycle, type 21 always 8659. Multiplex stays.
 
-  1. Raise travel above Japan type-38 +17=3 (1.5 px/frame).
-  2. Keep / tighten multiplex (less DMA, less per-tick SGDK).
-
-LEAD_MD_SPEED 6 = 128*6 = 3.0 px/frame cardinal (2× Japan). Type 21
-stays Japan 4. FRAME_LEAD look / NORMAL white / HIGH cycle unchanged.
+LEAD_MD_SPEED 3 = 128*3 = 1.5 px/frame cardinal (half of #153's 6).
+Type 21 stays Japan 4.
 
 Usage (from zanac-md):
     python tools/test_bolinha_volley_speed.py
@@ -52,24 +49,22 @@ def main() -> int:
 
     m = re.search(r"#define\s+LEAD_MD_SPEED\s+(\d+)", ent)
     if not m:
-        return fail("LEAD_MD_SPEED must name the MD travel speed")
+        return fail("LEAD_MD_SPEED must name the lead travel speed")
     spd = int(m.group(1))
-    if spd <= 3:
-        return fail("LEAD_MD_SPEED must be above Japan type-38 speed 3 (MD feel)")
-    if spd != 6:
-        return fail("LEAD_MD_SPEED must be 6 (3.0 px/f = 2× Japan 1.5)")
-    if "lead_md_faster_than_japan" not in ent:
-        return fail("C89 assert: LEAD_MD_SPEED > 3")
-    print("  LEAD_MD_SPEED %d (unit 128 → 3.0 px/frame cardinal)" % spd)
+    if spd != 3:
+        return fail("LEAD_MD_SPEED must be 3 (half of #153's 6)")
+    if "lead_md_faster_than_japan" in ent:
+        return fail("do not require LEAD_MD_SPEED > 3; expected is 3")
+    if "lead_md_speed_is_3" not in ent:
+        return fail("C89 assert: LEAD_MD_SPEED == 3")
+    print("  LEAD_MD_SPEED %d (unit 128 → 1.5 px/frame cardinal)" % spd)
 
     init = fn_span(
         ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)"
     ) or ""
     arm38 = init.split("variant == 38")[1][:500] if "variant == 38" in init else ""
     if "apply_dir_88(e, dir, LEAD_MD_SPEED)" not in arm38:
-        return fail("type 38 must use LEAD_MD_SPEED (not Japan 3)")
-    if "apply_dir_88(e, dir, 3)" in arm38:
-        return fail("type 38 must not keep Japan speed 3 — MD feel is the ask")
+        return fail("type 38 must use LEAD_MD_SPEED")
     arm37 = init.split("variant == 37")[1][:500] if "variant == 37" in init else ""
     if "LEAD_MD_SPEED" not in arm37:
         return fail("type 37 aimed disc must use LEAD_MD_SPEED")
@@ -79,14 +74,14 @@ def main() -> int:
     arm21 = init.split("variant == 21")[1][:400] if "variant == 21" in init else ""
     if "apply_dir_88(e, dir, 4)" not in arm21:
         return fail("type 21 must stay Japan speed 4")
-    print("  type 37/38/42/43: LEAD_MD_SPEED 6; type 21 stays 4")
+    print("  type 37/38/42/43: LEAD_MD_SPEED 3; type 21 stays 4")
 
     units = re.search(
         r"static const s16 k_unit_y\[16\] = \{\s*([^}]+)\}", ent, re.S
     )
     if not units or "128" not in units.group(1).split(",")[0]:
         return fail("k_unit_y[0] must stay mag 128 (4cf7 unit)")
-    print("  4cf7 unit mag 128 * 6 = 3.0 px/frame cardinal")
+    print("  4cf7 unit mag 128 * 3 = 1.5 px/frame cardinal")
 
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
     if drop.count("spawn_frag(") != 3 or ", 38)" not in drop:
@@ -183,7 +178,7 @@ def main() -> int:
     if "FRAME_LEAD" not in opth:
         return fail("options.h must keep FRAME_LEAD appearance lock")
 
-    print("ok: MD speed 6 + multiplex; type 21 / look unchanged")
+    print("ok: LEAD_MD_SPEED 3 + multiplex; type 21 / look unchanged")
     return 0
 
 
