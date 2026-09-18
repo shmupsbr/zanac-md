@@ -86,14 +86,11 @@ def main() -> int:
     print("  shot_vram_remember: paint_all keeps cur; no point-at-old-15")
 
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
-    arm = prep.split("ebullet_normal_lock")[1][:700] if "ebullet_normal_lock" in prep else ""
-    if "shot_bank_lookup" not in arm:
-        return fail("NORMAL 3+ discs must still share a bank")
-    if "return 0" not in arm:
-        return fail("first disc must still paint_all-15")
-    if "painted" not in arm:
-        return fail("NORMAL prepare must refuse an unpainted (frame,15) bank")
-    print("  shot_vram_prepare: share only painted 15; miss paints")
+    if "lead7_pin_ensure" not in prep:
+        return fail("NORMAL 3+ discs must share the Japan pat 7 pin")
+    if "ebullet_normal_lock" not in prep or "return 0" not in prep:
+        return fail("type 45 NORMAL / pin miss must still encode")
+    print("  shot_vram_prepare: Japan pat 7 pin; type 45 isolated")
 
     up = fn_span(ent, "static void spr_upload_color(Slot *s)") or ""
     skip = re.search(
