@@ -144,8 +144,10 @@ static u8  s_ram_only;          /* boot: assemble E800 without poking VRAM */
 static u8  s_assemble_peek;     /* peek assemble: tiles only, no place */
 static u8  s_wrap_pending;      /* 97e3 row waiting for post-88ed DMA */
 static u8  s_wrap_nt;           /* hidden_wrap(pre) latched at 97e3 */
+static u8  s_wrap_dup;          /* ZANAC MD: extra NT row (24*7/6) */
 static u8  s_peek_pending;      /* peek DMA deferred to commit_wrap */
 static u8  s_peek_nt;
+static u8  s_peek_dup;
 static u8  s_peek_line[PF_COLS];
 static u8  s_peek_have;         /* tiles pre-assembled on a quiet leftover */
 static u16 s_peek_maprow;
@@ -153,11 +155,14 @@ static u16 s_peek_maprow;
  * assembles R+2. Both steps on leftover 4 was the empty-screen hitch. */
 static u8  s_peek_mid;
 static u8  s_idol_mid;
-/* Two DMA_QUEUE HUD sources -- SGDK stores the pointer until vblank.
+/ * Two DMA_QUEUE HUD sources -- SGDK stores the pointer until vblank.
  * Playfield is 24-col queued DMA (Japan 9a79 vblank OUT); HUD 24-31
  * restore is the other slice. Original pads dst[24-31] so the restore
- * cannot leak leftover charset. */
-static u16 s_dma_row[2][MODE_H32_COLS];
+ * cannot leak leftover charset. Zanac MD expands to 30 H40 cols in the
+ * same buffer (MODE_H40_COLS); Original still only writes 32.
+ * MD wrap+dup+peek+peek-dup can queue 4 rows in one commit_wrap, so
+ * the ring is 4 for Zanac MD and still 0/1 for Original. */
+static u16 s_dma_row[4][MODE_H40_COLS];
 static u8  s_dma_flip;
 static TransferMethod s_row_tm = DMA_QUEUE;
 static ColSlot s_col_snap[COL_SLOTS];
@@ -672,8 +677,8 @@ static u16 tile_attr(u8 tid)
  * row north of the aligned top; do not DMA 97e3 there. */
 static u8 hidden_wrap_nt_at(u16 scroll_px)
 {
-    u16 off = (u16)((scroll_px + mode_y_off()) & 0xFF);
-    u8 py = (u8)(16 - off);
+    u16 off = mode_camera_off(scroll_px);
+    u8 py = (u8)((u8)mode_playfield_top() - off);
 
     return (u8)(py >> 3);
 }
@@ -738,28 +743,51 @@ static void dma_nt_row(u8 nt_y, const u8 *src, TransferMethod tm)
     }
     /* 9a79 B=0x18 at col 0. Do not expand to MODE_H32_COLS. */
     play_tm = tm;
-    VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, PF_COLS, play_tm);
-    /* Queued 32-col pad dropped word 0. A 1-cell rewrite of dst[0]
-     * keeps playfield col 0 even if the 24-word burst skips it. */
-    if (tm == DMA_QUEUE)
-        VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, 1, DMA_QUEUE);
     if (mode_get() == MODE_ORIGINAL)
     {
-        u16 blank = mode_letter_attr();
+        VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, PF_COLS, play_tm);
+        /* Queued 32-col pad dropped word 0. A 1-cell rewrite of dst[0]
+         * keeps playfield col 0 even if the 24-word burst skips it. */
+        if (tm == DMA_QUEUE)
+            VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, 1, DMA_QUEUE);
+        {
+            u16 blank = mode_letter_attr();
 
-        for (; x < MODE_H32_COLS; x++)
-            dst[x] = blank;
-        /* Restore cols 24-31 after the playfield write so WINDOW
-         * punch-through stays letter backing (0x4BDF six 0x20).
-         * Same tm: DMA_QUEUE restore commits in vblank. One row x 8
-         * tiles -- not a playfield fill, not a per-tick letterbox. */
-        VDP_setTileMapDataRow(BG_B, dst + MODE_BAR_COL, nt_y,
-                              MODE_BAR_COL, MODE_BAR_W, tm);
+            for (; x < MODE_H32_COLS; x++)
+                dst[x] = blank;
+            /* Restore cols 24-31 after the playfield write so WINDOW
+             * punch-through stays letter backing (0x4BDF six 0x20).
+             * Same tm: DMA_QUEUE restore commits in vblank. One row x 8
+             * tiles -- not a playfield fill, not a per-tick letterbox. */
+            VDP_setTileMapDataRow(BG_B, dst + MODE_BAR_COL, nt_y,
+                                  MODE_BAR_COL, MODE_BAR_W, tm);
+        }
+    }
+    else
+    {
+        u8 d;
+        u8 sc;
+        u16 cols = mode_map_cols();
+
+        /* 24 MSX cols → 30 H40: dest d samples src[d * 24 / 30]. */
+        for (d = 0; d < cols; d++)
+        {
+            sc = (u8)((u16)d * MODE_MSX_PF_COLS / MODE_MD_PF_COLS);
+            dst[d] = tile_attr(src[sc]);
+        }
+        VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, cols, play_tm);
+        if (tm == DMA_QUEUE)
+            VDP_setTileMapDataRow(BG_B, dst, nt_y, 0, 1, DMA_QUEUE);
     }
     /* DMA_QUEUE keeps the HUD source pointer until vblank -- do not
      * reuse this buffer while that restore is queued. */
     if (tm == DMA_QUEUE)
-        s_dma_flip ^= 1;
+    {
+        if (mode_get() == MODE_ORIGINAL)
+            s_dma_flip ^= 1;
+        else
+            s_dma_flip = (u8)((s_dma_flip + 1) & 3);
+    }
     /* Letterbox is clipped once per frame in bg_set_vscroll. Filling
      * four rects here on every 1-row DMA hitch the 60Hz loop. */
 }
@@ -774,8 +802,29 @@ static void flush_boot_playfield(void)
 {
     u8 i;
 
-    for (i = 0; i < BOOT_ROWS; i++)
-        dma_nt_row(i, s_e800[(u8)((s_e714 + i) % BOOT_ROWS)], DMA);
+    if (mode_get() != MODE_ZANAC_MD)
+    {
+        for (i = 0; i < BOOT_ROWS; i++)
+            dma_nt_row(i, s_e800[(u8)((s_e714 + i) % BOOT_ROWS)], DMA);
+        return;
+    }
+    /* 24 MSX rows → 28 H40 rows: duplicate after every 6th source. */
+    {
+        u8 md_y = 0;
+
+        for (i = 0; i < BOOT_ROWS; i++)
+        {
+            const u8 *src = s_e800[(u8)((s_e714 + i) % BOOT_ROWS)];
+
+            dma_nt_row(md_y, src, DMA);
+            md_y++;
+            if ((i % 6) == 5)
+            {
+                dma_nt_row(md_y, src, DMA);
+                md_y++;
+            }
+        }
+    }
 }
 
 /*
@@ -817,7 +866,7 @@ static void bg_set_vscroll(void)
     u16 off;
     u8 was_arm;
 
-    off = (u16)((s_scroll_px + mode_y_off()) & 0xFF);
+    off = mode_camera_off(s_scroll_px);
     s_vsram_b = (u16)(-(s16)off) & 0x3FF;
     was_arm = s_vsram_arm;
     s_vsram_arm = 1;
@@ -868,8 +917,13 @@ static void scroll_precompute(u16 map_row)
      * now would flush that pre-punch assemble over the digit/wreckage
      * XY poke (script=1, never retried). Latch and DMA after punches. */
     s_wrap_nt = hidden_wrap_nt_at(s_scroll_px);
+    s_wrap_dup = (u8)mode_map_dup_row(s_ms.row);
     if (s_row_tm != DMA_QUEUE)
+    {
         dma_nt_row(s_wrap_nt, s_e800[s_e714], s_row_tm);
+        if (s_wrap_dup)
+            dma_nt_row((u8)((s_wrap_nt - 1) & 31), s_e800[s_e714], s_row_tm);
+    }
     else
         s_wrap_pending = 1;
 }
@@ -883,11 +937,15 @@ void map_script_commit_wrap(void)
     {
         s_wrap_pending = 0;
         dma_nt_row(s_wrap_nt, s_e800[s_e714], s_row_tm);
+        if (s_wrap_dup)
+            dma_nt_row((u8)((s_wrap_nt - 1) & 31), s_e800[s_e714], s_row_tm);
     }
     if (s_peek_pending)
     {
         s_peek_pending = 0;
         dma_nt_row(s_peek_nt, s_peek_line, s_row_tm);
+        if (s_peek_dup)
+            dma_nt_row((u8)((s_peek_nt - 1) & 31), s_peek_line, s_row_tm);
     }
 }
 
@@ -1007,8 +1065,13 @@ static void peek_next_row_at(u16 map_row, u16 wrap_px)
      * fire_pending so cmd 9 (skip_precompute) cannot stamp a 0x28
      * sky line into wrap(scroll+8). */
     s_peek_nt = hidden_wrap_nt_at(wrap_px);
+    s_peek_dup = (u8)mode_map_dup_row(map_row);
     if (s_row_tm != DMA_QUEUE)
+    {
         dma_nt_row(s_peek_nt, s_peek_line, s_row_tm);
+        if (s_peek_dup)
+            dma_nt_row((u8)((s_peek_nt - 1) & 31), s_peek_line, s_row_tm);
+    }
     else
         s_peek_pending = 1;
 }
@@ -1021,6 +1084,26 @@ static void peek_next_row(u16 map_row)
     peek_next_row_at(map_row, (u16)(s_scroll_px + 8));
 }
 
+/* Stamp one MSX playfield cell onto BG_B. Original: 1:1 col. Zanac MD:
+ * 24→30 so a wreck/digit sits under the scaled sprite. E800/s_nt stay
+ * 24-col. */
+static void stamp_vram(u8 msx_col, u8 nt_row, u8 tid)
+{
+    u16 attr = tile_attr(tid);
+    u8 x0;
+    u8 n;
+    u8 i;
+
+    if (mode_get() == MODE_ORIGINAL)
+    {
+        VDP_setTileMapXY(BG_B, attr, msx_col, nt_row);
+        return;
+    }
+    mode_map_dest_cols(msx_col, &x0, &n);
+    for (i = 0; i < n; i++)
+        VDP_setTileMapXY(BG_B, attr, (u16)(x0 + i), nt_row);
+}
+
 /* 8ca2 / 88ed: stamp into circular E800 + the displayed nametable row. */
 static void nt_put(u8 col, u8 row, u8 tid)
 {
@@ -1031,7 +1114,7 @@ static void nt_put(u8 col, u8 row, u8 tid)
         return;
     row &= 31;
     s_nt[row][col] = tid;
-    VDP_setTileMapXY(BG_B, tile_attr(tid), col, row);
+    stamp_vram(col, row, tid);
 
     /* 9a79: screen i = E800[(E714+i) mod 24]. Playfield top is NT[(-k)&31]
      * after k = scroll_px/8 wraps, so vis i = (nt_row - first) & 31. */
@@ -1066,7 +1149,7 @@ static void punch_cell(u8 col, u8 screen_row, u8 tid)
         return;
     (void)nt_col;
     s_nt[nt_row][col] = tid;
-    VDP_setTileMapXY(BG_B, tile_attr(tid), col, nt_row);
+    stamp_vram(col, nt_row, tid);
 }
 
 /*
@@ -1113,9 +1196,10 @@ static int sat_to_nt(s16 x, s16 y, u8 *col, u8 *row)
  * uses stored SAT X. Zanac MD has no EC -- stamp at SAT X. */
 static s16 nt_from_sat_x(s16 sat_x)
 {
-    if (mode_get() == MODE_ORIGINAL)
-        return (s16)(sat_x - 0x20);
-    return sat_x;
+    /* 8854 / 8ca2 SUB 0x20: nametable pixel X of the tiles the player sees.
+     * Both modes stamp SAT_X-32 into E800 (MSX 24-col). Original also
+     * EC-draws at SAT-32; Zanac MD applies EC then *320/256 at draw. */
+    return (s16)(sat_x - 0x20);
 }
 
 /* 0x964C: A=ybase; ADD A,A*3; ADD blob_X; SUB 0x20. All 8-bit.
@@ -2626,8 +2710,26 @@ static void e800_flush_linear(void)
     u8 r;
 
     s_row_tm = DMA;
-    for (r = 0; r < BOOT_ROWS; r++)
-        dma_nt_row(r, s_e800[r], DMA);
+    if (mode_get() != MODE_ZANAC_MD)
+    {
+        for (r = 0; r < BOOT_ROWS; r++)
+            dma_nt_row(r, s_e800[r], DMA);
+    }
+    else
+    {
+        u8 md_y = 0;
+
+        for (r = 0; r < BOOT_ROWS; r++)
+        {
+            dma_nt_row(md_y, s_e800[r], DMA);
+            md_y++;
+            if ((r % 6) == 5)
+            {
+                dma_nt_row(md_y, s_e800[r], DMA);
+                md_y++;
+            }
+        }
+    }
     fill_letterbox_b();
     s_row_tm = DMA_QUEUE;
     s_scroll_px = 0;

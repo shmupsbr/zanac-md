@@ -33,15 +33,16 @@ void mode_init(void)
 {
     s_original.ship = &spr_ship;
     s_original.screen_width = 256;
-    s_original.playfield_w = 256;
-    s_original.playfield_h = 192;
+    s_original.playfield_w = MODE_MSX_W;
+    s_original.playfield_h = MODE_MSX_H;
     s_original.y_off = 16;
     s_original.name = "ORIGINAL";
 
+    /* Display is H40 320×224 via mode_draw_*; sim culls stay 256×192. */
     s_md.ship = &spr_ship;
-    s_md.screen_width = 320;
-    s_md.playfield_w = 320;
-    s_md.playfield_h = 224;
+    s_md.screen_width = MODE_MD_W;
+    s_md.playfield_w = MODE_MSX_W;
+    s_md.playfield_h = MODE_MSX_H;
     s_md.y_off = 0;
     s_md.name = "ZANAC MD";
 
@@ -67,7 +68,10 @@ const ModeAssets *mode_assets(void)
 
 s16 mode_draw_y(s16 y)
 {
-    return (s16)(y + (s16)s_cur->y_off);
+    if (s_mode == MODE_ORIGINAL)
+        return (s16)(y + (s16)s_cur->y_off);
+    /* ZANAC MD: y * 224/192. 68k signed 32 so SAT Y < 0 still scales. */
+    return (s16)(((s32)y * (s32)MODE_MD_H) / (s32)MODE_MSX_H);
 }
 
 s16 mode_draw_x(s16 x, u8 sat_col)
@@ -75,9 +79,16 @@ s16 mode_draw_x(s16 x, u8 sat_col)
     /* TMS9918 SAT colour bit7 = Early Clock: hardware draws at SAT_X-32.
      * Ship, shots, and EC enemies all use this so SAT overlap = graphic
      * overlap. Collision never calls this (4560 is SAT vs SAT). */
-    if (s_mode == MODE_ORIGINAL && (sat_col & 0x80))
-        return (s16)(x - 32);
-    return x;
+    if (s_mode == MODE_ORIGINAL)
+    {
+        if (sat_col & 0x80)
+            return (s16)(x - 32);
+        return x;
+    }
+    /* ZANAC MD: same EC, then * 320/256 so the visual column matches. */
+    if (sat_col & 0x80)
+        x = (s16)(x - 32);
+    return (s16)(((s32)x * (s32)MODE_MD_W) / (s32)MODE_MSX_W);
 }
 
 u16 mode_letter_attr(void)
@@ -106,7 +117,55 @@ u16 mode_y_off(void)
 
 u16 mode_text_row(u16 msx_row)
 {
-    return (u16)(msx_row + (s_cur->y_off / 8));
+    if (s_mode == MODE_ORIGINAL)
+        return (u16)(msx_row + (s_cur->y_off / 8));
+    return (u16)((msx_row * MODE_MD_H) / MODE_MSX_H);
+}
+
+u16 mode_camera_off(u16 scroll_px)
+{
+    if (s_mode == MODE_ORIGINAL)
+        return (u16)((scroll_px + s_cur->y_off) & 0xFF);
+    return (u16)(((u32)scroll_px * (u32)MODE_MD_H / (u32)MODE_MSX_H) & 0xFF);
+}
+
+u16 mode_playfield_top(void)
+{
+    if (s_mode == MODE_ORIGINAL)
+        return 16;
+    return 0;
+}
+
+u16 mode_map_cols(void)
+{
+    if (s_mode == MODE_ORIGINAL)
+        return MODE_MSX_PF_COLS;
+    return MODE_MD_PF_COLS;
+}
+
+void mode_map_dest_cols(u8 msx_col, u8 *x0, u8 *n)
+{
+    u8 a;
+    u8 b;
+
+    if (msx_col >= MODE_MSX_PF_COLS)
+    {
+        *x0 = MODE_MD_PF_COLS;
+        *n = 0;
+        return;
+    }
+    a = (u8)((u16)msx_col * MODE_MD_PF_COLS / MODE_MSX_PF_COLS);
+    b = (u8)((u16)(msx_col + 1) * MODE_MD_PF_COLS / MODE_MSX_PF_COLS);
+    *x0 = a;
+    *n = (u8)(b - a);
+}
+
+int mode_map_dup_row(u16 msx_row)
+{
+    /* 24 source rows → 28 dest: extra row after every 6th (row 6,12,18…). */
+    if (s_mode == MODE_ORIGINAL)
+        return 0;
+    return (msx_row != 0) && ((msx_row % 6) == 0);
 }
 
 void mode_apply_video(void)
