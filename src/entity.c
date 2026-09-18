@@ -348,28 +348,21 @@
 #define KIND_FIRE       3
 /* Fire 0/1/2/7 72de owns PAL2[13]. Shot-bank keys use the same index. */
 #define FIRE7_CRAM_NIB  13
-/* Bolinha discs (FRAME_LEAD 20/37/38/41/42/43) and type 45 bar/med
- * pulse share BULLET VISIBILITY. NORMAL = Japan 0x8F / baked 15
- * white+EC, no 8659. HIGH = TYPE21_CRAM_NIB 8659 R-nibble|0x80.
+/* Bolinha discs (Japan SAT 0x1C / gfx pat 7: types 20/37/38/41/42/43)
+ * and type 45 bar/med pulse share BULLET VISIBILITY.
+ *   NORMAL = Japan +04 0x8F / nibble 15, no 8659 (84eb/8513/8539/8672).
+ *   HIGH   = TYPE21_CRAM_NIB 8659 R-nibble|0x80 (port option).
  * Type 21 FRAME_LIGHT_BAR (`<===>`) is NOT in that switch: Japan
- * 8659 always colour-walks (8639 JR NZ 8659, no vis option). #143
- * wrongly forced it white under NORMAL.
+ * 8659 always colour-walks (8639 JR NZ 8659, no vis option).
  * Skill / ALC never enter. XOR walkers stay on nibble 2.
  *
- * #146 still had zero playtest effect: type 21 walked PAL2[4] while
- * SGDK-packed FRAME_LEAD pixels are nibble 4, and leave_white only
- * checked the *same frame* — a reused LIGHT_BAR sprite painted 4
- * into the shared white disc index. Dedicated CRAM, not 4, not 15.
- *
- * #147 still cycled box×3: the 12-slot shot bank missed a painted
- * FRAME_LEAD index, leftover SAT was uploaded as (oldframe,15), and
- * type 21 / fire 7 DMA'd a walked nibble into the untagged disc.
- * NORMAL discs lock a never-evicted white VRAM index; pixels are
- * nibble 15 only; PAL2[15] is not a walker.
- *
- * #147 TYPE21_CRAM_NIB=3 walked PAL2[3]. Type 44 green flyer is
- * sat_col 0x83 (TMS 3 light green). sat_col_tile_nibble then aliased
- * want==3 to nibble 12; 0x8D writes magenta there — purple plane. */
+ * #145–#149 shared FRAME_LEAD VRAM + CRAM/pin heuristics. SGDK
+ * BALANCED cuts FRAME_LEAD to an 8x8 UL shard of Japan pat 7 (the
+ * disc sits in the centre of the 16x16, so the UL tile is a 2px
+ * flake). Type 21 / fire 7 then DMA'd walked nibbles into that
+ * span — caixinha×3 cycled while early floor guns sometimes looked
+ * white. Colour now follows zanac-re shot init/update: encode the
+ * full pat 7 into a 16x16 vehicle, exclusive of type 21's pat 6. */
 #define LEAD_PACKED_NIB     4   /* SGDK FRAME_LEAD pixels; never 8659 */
 #define LEAD_WHITE_NIB     15   /* NORMAL Japan 0x8F bake; never walked */
 #define FLYER_GREEN_NIB     3   /* type 44 / veybar 22/23 sat_col 0x83 */
@@ -656,7 +649,8 @@ static void riser_dma_sgt(Slot *s);
 static void spr_sync_proj(Slot *s);
 static void spr_place(Slot *s, u16 frame);
 static void shot_vram_reset(void);
-static int white_pin_ensure(u8 frame, u16 *out);
+static int lead7_pin_ensure(u8 want, u16 *out);
+static void ebullet_place_lead(Slot *e);
 static u8 rnd(void);
 
 /*
@@ -805,36 +799,23 @@ typedef struct {
     u16 index;
 } ShotBank;
 static ShotBank s_shot_bank[SHOT_BANK_N];
-static u8 s_lead_white_ok;      /* RAM paint_all-15 FRAME_LEAD blit */
-/* Never-evicted NORMAL white VRAM. The 12-slot shot bank can miss a
- * painted FRAME_LEAD index (full, leftover-frame tags). Type 21 /
- * fire 7 then DMA a walked nibble into the untagged disc — box×3
- * after #147. #148 recorded the index but did not keep a live sprite
- * on it: keep_banked drops AUTO, the last disc dies, SGDK VRAM_free's
- * (or a later setVRAMTileIndex does), and type 21 / fire 7 occupy the
- * same tiles. Ground guns at start look white because nothing has
- * stolen the index yet; caixinha×3 later shares the dangling lock
- * and colour-cycles. A hidden pin sprite holds the tiles for the
- * whole game so the allocator cannot reuse them. */
-#define WHITE_LOCK_N  6
-#define WHITE_SPAN    4   /* spr_objs is 2x2; lock/leave the whole run */
+/* Japan pat 7 (SAT 0x1C) lead discs. Exclusive of type 21 pat 6.
+ * WHITE = NORMAL 0x8F / nibble 15. HIGH = TYPE21_CRAM_NIB + 8659.
+ * 4 tiles (16x16). Type 21 / fire 7 must not DMA onto these spans. */
+#define LEAD7_TILES     4
+#define LEAD7_BYTES     128
 typedef struct {
     u8  used;
-    u8  pinned;     /* live pin sprite; do not retarget this index */
-    u8  frame;
-    u8  ntiles;
-    u16 index;
-} WhiteLock;
-static WhiteLock s_white_lock[WHITE_LOCK_N];
-#define WHITE_PIN_N  3
-typedef struct {
-    u8  used;
-    u8  frame;
-    u8  ntiles;
+    u8  nib;
     u16 index;
     Sprite *spr;
-} WhitePin;
-static WhitePin s_white_pin[WHITE_PIN_N];
+} Lead7Pin;
+static Lead7Pin s_lead7_white;
+static Lead7Pin s_lead7_high;
+static u16 s_lead7_white_tiles[LEAD7_BYTES / 2];
+static u16 s_lead7_high_tiles[LEAD7_BYTES / 2];
+static u8  s_lead7_white_ok;
+static u8  s_lead7_high_ok;
 
 static int shot_art_shareable(const Slot *s)
 {
@@ -898,7 +879,7 @@ static int ebullet_normal_lock(const Slot *s)
 static int ebullet_white_frame(u8 fr)
 {
     return (fr == FRAME_LEAD || fr == FRAME_MED_CIRCLE
-            || fr == FRAME_LIGHT_BAR);
+            || fr == FRAME_LIGHT_BAR || fr == FRAME_CIRCLE);
 }
 
 /* Type 21 always TYPE21_CRAM_NIB 8659. HIGH bolinhas same. NORMAL
@@ -1021,121 +1002,54 @@ static int shot_vram_fresh_auto(Sprite *sp)
     return 1;
 }
 
-static void white_lock_reset(void)
+static void lead7_pin_drop(Lead7Pin *p)
 {
-    memset(s_white_lock, 0, sizeof(s_white_lock));
-}
-
-static void white_pin_forget(void)
-{
-    memset(s_white_pin, 0, sizeof(s_white_pin));
-}
-
-static void white_pin_release(void)
-{
-    u8 i;
-
-    for (i = 0; i < WHITE_PIN_N; i++)
+    if (p->spr)
     {
-        if (s_white_pin[i].spr)
-        {
-            /* Re-arm AUTO so SPR_releaseSprite VRAM_free's the span.
-             * AUTO-off (keep_banked) would leak the pin into the next
-             * game's allocator and look like a stolen white lock. */
-            s_white_pin[i].spr->status |= SPR_FLAG_AUTO_VRAM_ALLOC;
-            SPR_releaseSprite(s_white_pin[i].spr);
-        }
-        s_white_pin[i].spr = NULL;
-        s_white_pin[i].used = 0;
+        /* Re-arm AUTO so SPR_releaseSprite VRAM_free's the 4-tile span. */
+        p->spr->status |= SPR_FLAG_AUTO_VRAM_ALLOC;
+        SPR_releaseSprite(p->spr);
     }
+    p->spr = NULL;
+    p->used = 0;
+    p->index = 0;
+    p->nib = 0;
 }
 
-static void white_lock_add(u8 frame, u16 idx, u8 ntiles, u8 pinned)
+static void lead7_pin_release(void)
 {
-    u8 i;
-
-    if (!ntiles)
-        ntiles = WHITE_SPAN;
-    for (i = 0; i < WHITE_LOCK_N; i++)
-    {
-        if (s_white_lock[i].used && s_white_lock[i].frame == frame)
-        {
-            /* A live pin owns this frame. Box×3 DMA onto a fresh AUTO
-             * slot must not retarget the lock onto tiles type 21 can
-             * later occupy. */
-            if (s_white_lock[i].pinned && !pinned)
-                return;
-            s_white_lock[i].index = idx;
-            s_white_lock[i].ntiles = ntiles;
-            if (pinned)
-                s_white_lock[i].pinned = 1;
-            return;
-        }
-    }
-    for (i = 0; i < WHITE_LOCK_N; i++)
-    {
-        if (s_white_lock[i].used)
-            continue;
-        s_white_lock[i].used = 1;
-        s_white_lock[i].pinned = pinned;
-        s_white_lock[i].frame = frame;
-        s_white_lock[i].ntiles = ntiles;
-        s_white_lock[i].index = idx;
-        return;
-    }
+    lead7_pin_drop(&s_lead7_white);
+    lead7_pin_drop(&s_lead7_high);
 }
 
-static int white_lock_has_idx(u16 idx)
+static int lead7_span_overlaps(u16 idx, u8 ntiles, u16 pin_idx)
 {
-    u8 i;
-
-    for (i = 0; i < WHITE_LOCK_N; i++)
-        if (s_white_lock[i].used && s_white_lock[i].index == idx)
-            return 1;
-    return 0;
-}
-
-/* Type 21 / fire 7 / HIGH are 4-tile (spr_objs 2x2). A base-index-only
- * check misses a bar allocated at lock-1 that DMA's across the disc. */
-static int white_lock_overlaps(u16 idx, u8 ntiles)
-{
-    u8 i;
     u16 a1;
+    u16 b1;
 
     if (!ntiles)
-        ntiles = WHITE_SPAN;
+        ntiles = LEAD7_TILES;
     a1 = (u16)(idx + ntiles);
-    for (i = 0; i < WHITE_LOCK_N; i++)
-    {
-        u16 b0;
-        u16 b1;
-        u8 bn;
+    b1 = (u16)(pin_idx + LEAD7_TILES);
+    return (idx < b1 && pin_idx < a1);
+}
 
-        if (!s_white_lock[i].used)
-            continue;
-        bn = s_white_lock[i].ntiles;
-        if (!bn)
-            bn = WHITE_SPAN;
-        b0 = s_white_lock[i].index;
-        b1 = (u16)(b0 + bn);
-        if (idx < b1 && b0 < a1)
-            return 1;
-    }
+/* Type 21 / fire 7 must not DMA onto Japan pat 7 tiles. */
+static int lead7_pin_overlaps(u16 idx, u8 ntiles)
+{
+    if (s_lead7_white.used && lead7_span_overlaps(idx, ntiles, s_lead7_white.index))
+        return 1;
+    if (s_lead7_high.used && lead7_span_overlaps(idx, ntiles, s_lead7_high.index))
+        return 1;
     return 0;
 }
 
-static int white_lock_lookup(u8 frame, u16 *out)
+static int lead7_pin_has_idx(u16 idx)
 {
-    u8 i;
-
-    for (i = 0; i < WHITE_LOCK_N; i++)
-    {
-        if (s_white_lock[i].used && s_white_lock[i].frame == frame)
-        {
-            *out = s_white_lock[i].index;
-            return 1;
-        }
-    }
+    if (s_lead7_white.used && s_lead7_white.index == idx)
+        return 1;
+    if (s_lead7_high.used && s_lead7_high.index == idx)
+        return 1;
     return 0;
 }
 
@@ -1143,12 +1057,12 @@ static void shot_vram_reset(void)
 {
     /* SPR_reset (game_boot / go_title) rebuilds the sprite VRAM region.
      * Banked sprites already dropped AUTO so SPR_releaseSprite did not
-     * VRAM_free; do not invent VDP_releaseTiles. Release the pin while
-     * its Sprite* is still valid (entity_release, before SPR_reset). */
+     * VRAM_free; do not invent VDP_releaseTiles. Release the pat-7 pin
+     * while its Sprite* is still valid (entity_release, before SPR_reset). */
     memset(s_shot_bank, 0, sizeof(s_shot_bank));
-    s_lead_white_ok = 0;
-    white_pin_release();
-    white_lock_reset();
+    s_lead7_white_ok = 0;
+    s_lead7_high_ok = 0;
+    lead7_pin_release();
 }
 
 /* Proven paint_all-15: every nonzero body nibble is white. A (frame,15)
@@ -1162,7 +1076,7 @@ static int shot_vram_white_proven(const Slot *s, u8 want)
     if (!s->spr || want != 15)
         return 0;
     idx = (u16)(s->spr->attribut & TILE_INDEX_MASK);
-    if (white_lock_has_idx(idx))
+    if (lead7_pin_has_idx(idx))
         return 1;
     for (i = 0; i < SHOT_BANK_N; i++)
     {
@@ -1221,20 +1135,20 @@ static int shot_bank_index_is_lead(u16 idx)
     return 0;
 }
 
-/* Leave a proven white / FRAME_LEAD bank before DMA of any other
- * nibble (type 21 / HIGH 8659). Frame is ignored on purpose. A 4-tile
- * bar whose base is lock-1 still overlaps the disc — check the span. */
+/* Leave Japan pat 7 / proven white tiles before DMA of any other
+ * nibble (type 21 / HIGH 8659). A 4-tile bar whose base is pin-1
+ * still overlaps the disc — check the span. */
 static int shot_vram_leave_white(Sprite *sp, u8 nib)
 {
     u16 cur;
-    u8 ntiles = WHITE_SPAN;
+    u8 ntiles = LEAD7_TILES;
 
     if (!sp || nib == LEAD_WHITE_NIB)
         return 1;
     cur = (u16)(sp->attribut & TILE_INDEX_MASK);
     if (sp->frame && sp->frame->tileset && sp->frame->tileset->numTile)
         ntiles = (u8)sp->frame->tileset->numTile;
-    if (!white_lock_overlaps(cur, ntiles)
+    if (!lead7_pin_overlaps(cur, ntiles)
         && !shot_bank_index_is_white(cur) && !shot_bank_index_is_lead(cur))
         return 1;
     return shot_vram_fresh_auto(sp);
@@ -1248,8 +1162,8 @@ static void shot_vram_remember(Slot *s, u8 want, u8 ntiles, u8 painted)
     if (!s->spr || !ntiles || !shot_vram_cacheable(s, want))
         return;
     cur = (u16)(s->spr->attribut & TILE_INDEX_MASK);
-    /* Do not alias a cycling nibble onto locked white tiles (span). */
-    if (want != LEAD_WHITE_NIB && white_lock_overlaps(cur, ntiles))
+    /* Do not alias a cycling nibble onto Japan pat 7 tiles. */
+    if (want != LEAD_WHITE_NIB && lead7_pin_overlaps(cur, ntiles))
         return;
     for (i = 0; i < SHOT_BANK_N; i++)
     {
@@ -1295,20 +1209,12 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
 
     if (!s->spr || !shot_art_shareable(s))
         return 0;
-    /* #142 tagged (FRAME_LEAD, 15) without painting. #145 shared any
-     * remembered 15, including verbatim packed nibble 4. #146 still
-     * leaked: type 21 retargeted onto a FRAME_LEAD index because
-     * leave_white keyed the same frame. NORMAL shares only a proven
-     * paint_all-15 bank of THIS frame. Type 21 / HIGH must not sit on
-     * any white or FRAME_LEAD index. Lookup miss still paints. */
-    if (ebullet_normal_lock(s))
+    /* Lead discs share only the Japan pat 7 pin (16x16, exclusive of
+     * type 21 pat 6). Type 45 NORMAL paints its own white tiles — never
+     * the type-21 light_bar bank. Type 21 / HIGH must not sit on pat 7. */
+    if (ebullet_lead_disc(s))
     {
-        /* Pin first; painted bank fallback. */
-        if (want == LEAD_WHITE_NIB
-            && (white_pin_ensure(s->frame, &idx)
-                || white_lock_lookup(s->frame, &idx)
-                || (shot_bank_lookup(s->frame, want, &idx)
-                    && shot_bank_painted_at(s->frame, LEAD_WHITE_NIB, idx))))
+        if (lead7_pin_ensure(want, &idx))
         {
             shot_vram_point(s->spr, idx);
             s->vram_fr = s->frame;
@@ -1317,12 +1223,14 @@ static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)
         }
         return 0;
     }
+    if (ebullet_normal_lock(s))
+        return 0;
     if (shot_bank_lookup(s->frame, want, &idx))
     {
-        /* Type 21 / HIGH must not retarget onto a white or lead bank. */
+        /* Type 21 / HIGH must not retarget onto Japan pat 7. */
         if (want != LEAD_WHITE_NIB
-            && (white_lock_overlaps(idx, ntiles)
-                || white_lock_has_idx(idx)
+            && (lead7_pin_overlaps(idx, ntiles)
+                || lead7_pin_has_idx(idx)
                 || shot_bank_index_is_white(idx) || shot_bank_index_is_lead(idx)))
             return 0;
         shot_vram_point(s->spr, idx);
@@ -1945,16 +1853,11 @@ static u16 s_remap_key[REMAP_CACHE_N];
 static u8  s_remap_paint[REMAP_CACHE_N]; /* 1 = paint_all; 0 = from→to */
 static u8  s_remap_used;
 static u8  s_remap_next;
-/* NORMAL FRAME_LEAD: paint_all-15 once into RAM, DMA as one blit.
- * Per-pixel rebuild every place was the 3+ slowdown; sharing a lying
- * (frame,15) bank was the colour-cycle. This buffer is the pixels. */
-static u16 s_lead_white[REMAP_TILE_BYTES / 2];
 
 static void remap_cache_reset(void)
 {
     s_remap_used = 0;
     s_remap_next = 0;
-    s_lead_white_ok = 0;
 }
 
 static const u8 *remap_cache_get(u8 frame, u8 baked, u8 want,
@@ -1989,62 +1892,49 @@ static const u8 *remap_cache_get(u8 frame, u8 baked, u8 want,
     return dst;
 }
 
-/* NORMAL FRAME_LEAD white pixels. Built once; later DMA is a blit from
- * this buffer, not orb_paint per disc. Shared VRAM still retargets the
- * proven bank — this is the miss / first-paint path. */
-static const u8 *lead_white_buf(const u8 *src, u16 nbytes)
+/* Japan gfx pat 7 (SAT 0x1C). Built once per nibble. NORMAL = 15;
+ * HIGH = TYPE21_CRAM_NIB. Type 21 never reads these bytes. */
+static const u8 *lead7_tiles(u8 want)
 {
-    if (!s_lead_white_ok)
+    if (want == LEAD_WHITE_NIB)
     {
-        if (nbytes > REMAP_TILE_BYTES)
-            nbytes = REMAP_TILE_BYTES;
-        orb_paint_body_nibbles((u8 *)s_lead_white, src, nbytes, LEAD_WHITE_NIB);
-        orb_keep_body_nibbles((u8 *)s_lead_white, nbytes, LEAD_WHITE_NIB);
-        s_lead_white_ok = 1;
+        if (!s_lead7_white_ok)
+        {
+            orb_encode_japan_tiles((u8 *)s_lead7_white_tiles, k_japan_pat7,
+                                   LEAD_WHITE_NIB);
+            s_lead7_white_ok = 1;
+        }
+        return (const u8 *)s_lead7_white_tiles;
     }
-    return (const u8 *)s_lead_white;
+    if (!s_lead7_high_ok)
+    {
+        orb_encode_japan_tiles((u8 *)s_lead7_high_tiles, k_japan_pat7, want);
+        s_lead7_high_ok = 1;
+    }
+    return (const u8 *)s_lead7_high_tiles;
 }
 
-/* Hidden sprite that owns NORMAL white tiles for one SAT-name frame.
- * keep_banked so SPR_releaseSprite of every disc cannot VRAM_free this
- * span. Type 21 / fire 7 / HIGH must leave_white off the overlap. */
-static int white_pin_ensure(u8 frame, u16 *out)
+/* Hidden 16x16 sprite that owns Japan pat 7 tiles for one nibble.
+ * FRAME_CIRCLE is the vehicle (4 tiles). keep_banked so disc death
+ * cannot VRAM_free the span. Type 21 / fire 7 must leave_white. */
+static int lead7_pin_ensure(u8 want, u16 *out)
 {
-    u8 i;
-    u8 slot;
+    Lead7Pin *pin;
     Sprite *sp;
-    TileSet *ts;
-    u16 nbytes;
     u16 vaddr;
     u16 idx;
-    const u8 *src;
     const u8 *cached;
-    static u8 s_pin_tiles[REMAP_TILE_BYTES];
 
-    if (frame != FRAME_LEAD && frame != FRAME_LIGHT_BAR
-        && frame != FRAME_MED_CIRCLE)
-        return 0;
-    for (i = 0; i < WHITE_PIN_N; i++)
+    pin = (want == LEAD_WHITE_NIB) ? &s_lead7_white : &s_lead7_high;
+    if (pin->used && pin->spr && pin->nib == want)
     {
-        if (s_white_pin[i].used && s_white_pin[i].frame == frame
-            && s_white_pin[i].spr)
-        {
-            *out = s_white_pin[i].index;
-            return 1;
-        }
+        *out = pin->index;
+        return 1;
     }
-    slot = 0xFF;
-    for (i = 0; i < WHITE_PIN_N; i++)
-    {
-        if (!s_white_pin[i].used)
-        {
-            slot = i;
-            break;
-        }
-    }
-    if (slot == 0xFF)
-        return 0;
+    if (pin->used)
+        lead7_pin_drop(pin);
 
+    /* 16x16 vehicle: SGDK FRAME_LEAD is 8x8 and would show only UL. */
     sp = SPR_addSpriteEx(&spr_objs, -64, -64,
                          TILE_ATTR(PAL2, FALSE, FALSE, FALSE),
                          SPR_FLAG_AUTO_VRAM_ALLOC);
@@ -2055,7 +1945,7 @@ static int white_pin_ensure(u8 frame, u16 *out)
     SPR_setDepth(sp, SPR_MAX_DEPTH);
     sp->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
     shot_vram_own(sp);
-    SPR_setAnimAndFrame(sp, 0, frame);
+    SPR_setAnimAndFrame(sp, 0, FRAME_CIRCLE);
     sp->status &= (u16)~SPR_FLAG_AUTO_TILE_UPLOAD;
     shot_vram_own(sp);
     if (!sp->frame || !sp->frame->tileset || !sp->frame->tileset->numTile)
@@ -2064,32 +1954,50 @@ static int white_pin_ensure(u8 frame, u16 *out)
         SPR_releaseSprite(sp);
         return 0;
     }
-    ts = sp->frame->tileset;
-    nbytes = (u16)(ts->numTile * 32);
-    if (nbytes > REMAP_TILE_BYTES)
-        nbytes = REMAP_TILE_BYTES;
-    src = (const u8 *)FAR_SAFE(ts->tiles, nbytes);
-    if (frame == FRAME_LEAD)
-        cached = lead_white_buf(src, nbytes);
-    else
-    {
-        orb_paint_body_nibbles(s_pin_tiles, src, nbytes, LEAD_WHITE_NIB);
-        orb_keep_body_nibbles(s_pin_tiles, nbytes, LEAD_WHITE_NIB);
-        cached = s_pin_tiles;
-    }
+    cached = lead7_tiles(want);
     vaddr = (u16)((sp->attribut & TILE_INDEX_MASK) * 32);
-    DMA_queueDma(DMA_VRAM, (void *)cached, vaddr, (u16)(nbytes / 2), 2);
+    DMA_queueDma(DMA_VRAM, (void *)cached, vaddr, (u16)(LEAD7_BYTES / 2), 2);
     idx = (u16)(sp->attribut & TILE_INDEX_MASK);
     shot_vram_keep_banked(sp);
     shot_vram_own(sp);
-    white_lock_add(frame, idx, (u8)ts->numTile, 1);
-    s_white_pin[slot].used = 1;
-    s_white_pin[slot].frame = frame;
-    s_white_pin[slot].ntiles = (u8)ts->numTile;
-    s_white_pin[slot].index = idx;
-    s_white_pin[slot].spr = sp;
+    pin->used = 1;
+    pin->nib = want;
+    pin->index = idx;
+    pin->spr = sp;
     *out = idx;
     return 1;
+}
+
+/* Point a lead disc at the Japan pat 7 pin. SAT name stays 0x1C
+ * (ebullet_sat_name); tiles are the full 16x16 disc, not FRAME_LEAD. */
+static int ebullet_upload_lead7(Slot *s, u8 want)
+{
+    u16 idx;
+    Sprite *sp = s->spr;
+
+    if (!sp || !ebullet_lead_disc(s))
+        return 0;
+    if (s->vram_fr == 0x1C && s->vram_nib == want && s->sat == 0x1C
+        && lead7_pin_has_idx((u16)(sp->attribut & TILE_INDEX_MASK)))
+        return 1;
+    if (!lead7_pin_ensure(want, &idx))
+        return 0;
+    shot_vram_point(sp, idx);
+    s->sat = 0x1C;
+    s->vram_fr = 0x1C;
+    s->vram_nib = want;
+    shot_vram_own(sp);
+    return 1;
+}
+
+static void ebullet_place_lead(Slot *e)
+{
+    /* Japan 84eb/8513/8539/8672: SAT 0x1C pat 7. FRAME_CIRCLE is the
+     * 16x16 vehicle; FRAME_LEAD is an 8x8 UL shard of the same pat. */
+    spr_place(e, FRAME_CIRCLE);
+    e->sat = 0x1C;
+    if (e->spr)
+        (void)ebullet_upload_lead7(e, proj_tile_want(e));
 }
 
 static const u8 *orb_cache_get(u8 sat, const u8 *jp, u8 want)
@@ -2205,6 +2113,13 @@ static void spr_upload_color(Slot *s)
      * SGDK FRAME_LEAD tileset (BALANCED 8x8 UL shard / leftover nibbles). */
     if (orb_upload_japan(s, want))
         return;
+    /* Lead discs: Japan pat 7 into the 16x16 vehicle. Never FRAME_LEAD
+     * packed nibble 4 and never type 21's light_bar tiles. */
+    if (ebullet_lead_disc(s))
+    {
+        if (ebullet_upload_lead7(s, want))
+            return;
+    }
 
     /* Same frame + same nibble: vis/XOR-high-nibble blinks must not DMA.
      * #144 refused this skip under NORMAL so every white bolinha
@@ -2224,8 +2139,8 @@ static void spr_upload_color(Slot *s)
      * stolen pin span. Bust so leave_white can fresh_auto off it. */
     if (ebullet_cram_shot(s)
         && s->vram_fr == s->frame && s->vram_nib == want
-        && white_lock_overlaps((u16)(sp->attribut & TILE_INDEX_MASK),
-                               (u8)ts->numTile))
+        && lead7_pin_overlaps((u16)(sp->attribut & TILE_INDEX_MASK),
+                              (u8)ts->numTile))
     {
         s->vram_fr = 0xFF;
         s->vram_nib = 0xFF;
@@ -2269,9 +2184,6 @@ static void spr_upload_color(Slot *s)
         u8 paint_bar = (u8)(ebullet_bolinha(s) || ebullet_normal_lock(s)
                             || ebullet_cram_shot(s));
         u8 painted = (u8)(disc || paint_bar);
-        u8 lead_white = (u8)(ebullet_normal_lock(s)
-                             && s->frame == FRAME_LEAD
-                             && want == LEAD_WHITE_NIB);
 
         /* Verbatim tiles: queue ROM/FAR src. Skip the 128-byte copy
          * into a DMA scratch (and do not allocateAndQueue an unused buf). */
@@ -2288,18 +2200,16 @@ static void spr_upload_color(Slot *s)
         /* Cache the remapped tiles and DMA from the slot. allocateAndQueue
          * every XOR/72de tick was the leftover 68000 cost after the orb
          * variant cache; a warm (frame,nibble) slot is a plain queue.
-         * NORMAL FRAME_LEAD uses the dedicated white RAM blit. */
+         * Lead discs already returned via ebullet_upload_lead7. Type 45
+         * NORMAL keeps body nibble 15 on its own tiles (not type 21). */
         {
             const u8 *cached;
             u16 nq = nbytes;
 
             if (nq > REMAP_TILE_BYTES)
                 nq = REMAP_TILE_BYTES;
-            if (lead_white)
-                cached = lead_white_buf(src, nq);
-            else
-                cached = remap_cache_get(s->frame, baked, want, src,
-                                         nbytes, painted);
+            cached = remap_cache_get(s->frame, baked, want, src,
+                                     nbytes, painted);
             if (disc)
             {
                 static u8 s_disc[REMAP_TILE_BYTES];
@@ -2316,9 +2226,6 @@ static void spr_upload_color(Slot *s)
                 orb_keep_body_nibbles(s_white_only, nq, LEAD_WHITE_NIB);
                 DMA_queueDma(DMA_VRAM, s_white_only, vaddr,
                              (u16)(nq / 2), 2);
-                white_lock_add(s->frame,
-                               (u16)(sp->attribut & TILE_INDEX_MASK),
-                               (u8)ts->numTile, 0);
             }
             else
                 DMA_queueDma(DMA_VRAM, (void *)cached, vaddr,
@@ -2326,10 +2233,6 @@ static void spr_upload_color(Slot *s)
         }
         s->vram_fr = s->frame;
         s->vram_nib = want;
-        if (ebullet_normal_lock(s) && want == LEAD_WHITE_NIB)
-            white_lock_add(s->frame,
-                           (u16)(sp->attribut & TILE_INDEX_MASK),
-                           (u8)ts->numTile, 0);
         shot_vram_remember(s, want, (u8)ts->numTile, painted);
         shot_vram_own(sp);
     }
@@ -2366,7 +2269,8 @@ static void spr_set_sat_col(Slot *s, u8 col)
         /* Do not upload leftover crate / type21 / flyer tiles as
          * (oldframe, 15) — that filled the 12-slot bank and left
          * FRAME_LEAD untagged so type 21 DMA'd nibble 3 into it. */
-        if (s->spr && s->spr->frame && ebullet_white_frame(s->frame))
+        if (s->spr && (ebullet_lead_disc(s)
+                       || (s->spr->frame && ebullet_white_frame(s->frame))))
         {
             spr_upload_color(s);
             shot_vram_own(s->spr);
@@ -2447,17 +2351,15 @@ static void spr_place(Slot *s, u16 frame)
         share = 0;
         if (shot_art_shareable(s))
         {
-            /* NORMAL discs share only the never-evicted white lock.
-             * A (FRAME_LEAD,15) shot-bank hit can be leftover-frame
-             * paint or an unpainted packed-4 tag. */
-            if (ebullet_normal_lock(s) && want == LEAD_WHITE_NIB
-                && white_pin_ensure((u8)frame, &bank_idx))
+            /* Lead discs share only the Japan pat 7 pin. Type 45
+             * NORMAL does not share (own white tiles). Type 21 / HIGH
+             * share their own bank, never pat 7. */
+            if (ebullet_lead_disc(s) && lead7_pin_ensure(want, &bank_idx))
                 share = 1;
-            else if (ebullet_normal_lock(s) && want == LEAD_WHITE_NIB
-                     && white_lock_lookup((u8)frame, &bank_idx))
-                share = 1;
-            else if (!ebullet_normal_lock(s)
-                     && shot_bank_lookup((u8)frame, want, &bank_idx))
+            else if (!ebullet_lead_disc(s) && !ebullet_normal_lock(s)
+                     && shot_bank_lookup((u8)frame, want, &bank_idx)
+                     && !lead7_pin_has_idx(bank_idx)
+                     && !lead7_pin_overlaps(bank_idx, LEAD7_TILES))
                 share = 1;
         }
         s->spr = SPR_addSpriteEx(&spr_objs, mode_draw_x(s->x, s->sat_col),
@@ -2924,7 +2826,7 @@ static u8 ebullet_sat_name(const Slot *e)
         return 0x18;            /* 863b light bar pat 6 */
     if (t == 45)
         return e->sat ? e->sat : (u8)0x18;  /* 8625 0x18 / 0x20 pulse */
-    return 0x1C;                /* 84eb / 8672 lead pat 6 */
+    return 0x1C;                /* 84eb / 8513 / 8672 lead pat 7 */
 }
 
 static int hit_overlap_slot(s16 x1, s16 y1, u8 sat1, const Slot *e)
@@ -3448,7 +3350,7 @@ static void spawn_ebullet_dir(s16 x, s16 y, u8 dir)
     apply_dir(e, dir);
     e->alive = 1;
     ebullet_apply_vis(e);        /* vis owns +04; Japan 84eb is 0x8F */
-    spr_place(e, FRAME_LEAD);
+    ebullet_place_lead(e);
     ebullet_apply_vis(e);
     /* 84fa RET: same first-visit skip as init_frag variant 37. */
     {
@@ -4285,7 +4187,7 @@ static void spawn_lead20(s16 x, s16 y)
     else if (c->spr)
         shot_vram_own(c->spr);
     ebullet_apply_vis(c);        /* vis owns +04; Japan 8672 is 0x8F */
-    spr_place(c, FRAME_LEAD);
+    ebullet_place_lead(c);
     ebullet_apply_vis(c);
 }
 
@@ -4775,10 +4677,10 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
     e->x = x;
     e->y = y;
     /* Leftover crate / type 21 / flyer SAT cannot ride a NORMAL
-     * disc: first apply_vis used to paint the OLD frame as (fr,15)
-     * and fill the 12-slot bank. Fresh sprite; share the pinned
-     * white FRAME_LEAD index. HIGH keeps leftover SAT (cycle).
-     * Detach even when spr is NULL: a leftover marker can remain. */
+     * disc: first apply_vis used to paint the OLD frame as (fr,15).
+     * Fresh sprite; Japan pat 7 on the 16x16 vehicle. HIGH keeps
+     * leftover SAT (cycle). Detach even when spr is NULL: a leftover
+     * marker can remain. */
     if (ebullet_normal_lock(e))
         spr_detach(e);
     apply_dir(e, dir);
@@ -4857,8 +4759,12 @@ static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)
      * again after so NORMAL paint_all-15 owns a new SAT (first place
      * used to leave NEED_TILES_UPLOAD / packed nibble 4). */
     ebullet_apply_vis(e);
-    /* 21: SAT 0x18 pat 6. 45: 850b writes 0x1C then 8625 pulses 0x18/0x20. */
-    spr_place(e, (variant == 21 || variant == 45) ? FRAME_LIGHT_BAR : FRAME_LEAD);
+    /* 21: SAT 0x18 pat 6. 45: 850b writes 0x1C then 8625 pulses 0x18/0x20.
+     * Lead discs: Japan SAT 0x1C pat 7 on a 16x16 vehicle. */
+    if (variant == 21 || variant == 45)
+        spr_place(e, FRAME_LIGHT_BAR);
+    else
+        ebullet_place_lead(e);
     ebullet_apply_vis(e);
     /* 37 84fa / 38 8524 / 41 857e / 21 8656: SET 7 RET.
      * 42/43: CALL 84e3/8507 (those RETs return into XOR) then 85ed RET.
@@ -6174,7 +6080,7 @@ static int spawn_from_type(u8 t)
         else if (e->spr)
             shot_vram_own(e->spr);
         ebullet_apply_vis(e);        /* vis owns +04; Japan 8672 is 0x8F */
-        spr_place(e, FRAME_LEAD);
+        ebullet_place_lead(e);
         ebullet_apply_vis(e);
     }
     else if (t == 56)
@@ -8061,14 +7967,16 @@ void entity_init(void)
     PAL_setPalette(PAL2, k_tms_vdp, CPU);
     pal2_write(LEAD_WHITE_NIB, k_tms_vdp[LEAD_WHITE_NIB]);
     pal2_write(FLYER_GREEN_NIB, k_tms_vdp[FLYER_GREEN_NIB]);
-    /* SPR_reset already destroyed any previous pin Sprite*. Forget
-     * dangling pointers, then hold FRAME_LEAD white for the session. */
-    white_pin_forget();
-    white_lock_reset();
+    /* SPR_reset already destroyed any previous pin Sprite*. Hold
+     * Japan pat 7 (SAT 0x1C) white tiles for the session. HIGH pin
+     * is created on first HIGH disc. Type 21 never sits here. */
+    lead7_pin_release();
     {
         u16 pin_idx;
 
-        (void)white_pin_ensure(FRAME_LEAD, &pin_idx);
+        (void)lead7_pin_ensure(LEAD_WHITE_NIB, &pin_idx);
+        if (options_bullet_high())
+            (void)lead7_pin_ensure(TYPE21_CRAM_NIB, &pin_idx);
     }
     /* PAL2[2] and PAL2[3] used to be overridden to half brightness so the
      * flyers would read against the map. That was compensation for a palette

@@ -187,13 +187,13 @@ def main() -> int:
         return fail("init_frag must arm colour via ebullet_apply_vis")
     if re.search(r"if\s*\(\s*variant\s*==\s*21\s*\)\s*\n\s*e->sat_col", frag):
         return fail("init_frag must not invent a private type 21 +04")
-    if "FRAME_LIGHT_BAR : FRAME_LEAD" not in frag.replace(" ", "") and (
-        "(variant == 21 || variant == 45) ? FRAME_LIGHT_BAR : FRAME_LEAD" not in frag
-    ):
-        return fail("type 21/45 spr_place FRAME_LIGHT_BAR; leads FRAME_LEAD")
+    if "FRAME_LIGHT_BAR" not in frag:
+        return fail("type 21/45 spr_place FRAME_LIGHT_BAR")
+    if "ebullet_place_lead" not in frag:
+        return fail("lead discs must ebullet_place_lead (Japan pat 7, not FRAME_LEAD shard)")
     if "cram_nib = 0" not in frag:
         return fail("init_frag must clear leftover cram_nib before spr_place")
-    print("  init_frag: apply_vis; 21/45 FRAME_LIGHT_BAR; leads FRAME_LEAD")
+    print("  init_frag: apply_vis; 21/45 FRAME_LIGHT_BAR; leads Japan pat 7")
 
     apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)")
     if not apply:

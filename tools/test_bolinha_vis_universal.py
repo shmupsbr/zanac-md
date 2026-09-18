@@ -255,17 +255,13 @@ def main() -> int:
 
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)")
     if not prep or "ebullet_normal_lock" not in prep:
-        return fail("shot_vram_prepare must refuse the (FRAME_LEAD,15) skip under NORMAL")
-    lock_arm = prep.split("ebullet_normal_lock")[1][:500] if "ebullet_normal_lock" in prep else ""
-    if "shot_bank_lookup" not in lock_arm:
-        return fail("NORMAL lock must share a remembered (FRAME_LEAD,15) bank")
-    if "white_pin_ensure" not in lock_arm:
-        return fail("NORMAL lock must share the live white pin (box×3)")
+        return fail("shot_vram_prepare must refuse type-21 share under NORMAL")
+    if "lead7_pin_ensure" not in prep:
+        return fail("NORMAL lead discs must share the Japan pat 7 pin")
+    lock_arm = prep.split("ebullet_normal_lock")[1][:300] if "ebullet_normal_lock" in prep else ""
     if "return 0" not in lock_arm:
-        return fail("NORMAL lock must return 0 on lookup miss (first paint_all)")
-    if "painted" not in lock_arm and "shot_bank_painted_at" not in lock_arm:
-        return fail("NORMAL lock must not share a verbatim packed-nibble-4 bank")
-    print("  shot_vram_prepare: share after paint_all-15; miss still paints")
+        return fail("type 45 NORMAL must return 0 (own white tiles, not type 21)")
+    print("  shot_vram_prepare: Japan pat 7 pin; type 45 NORMAL isolated")
 
     place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
     if "else\n                spr_upload_color(s)" in place or (

@@ -101,13 +101,11 @@ def main() -> int:
     print("  spr_set_sat_col: 0x8F + release + invalidate; no CRAM")
 
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
-    # return 0 must sit in the lock arm, not only at the function tail.
-    arm = prep.split("ebullet_normal_lock")[1][:500] if "ebullet_normal_lock" in prep else ""
-    if "shot_bank_lookup" not in arm or "return 0" not in arm:
-        return fail("shot_vram_prepare NORMAL arm must lookup then return 0 on miss")
-    if "shot_bank_painted_at" not in arm and "painted" not in arm:
-        return fail("NORMAL share must require a paint_all-15 bank, not any (frame,15) tag")
-    print("  shot_vram_prepare: share remembered paint_all-15; miss still paint_all")
+    if "ebullet_lead_disc" not in prep or "lead7_pin_ensure" not in prep:
+        return fail("shot_vram_prepare must share only the Japan pat 7 pin")
+    if "return 0" not in prep:
+        return fail("prepare miss must still encode/paint")
+    print("  shot_vram_prepare: Japan pat 7 pin; type 45 NORMAL does not share type 21")
 
     place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
     if re.search(

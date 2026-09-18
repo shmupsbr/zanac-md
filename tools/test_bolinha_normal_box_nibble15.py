@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
-"""#148 still colour-cycled box×3. NORMAL discs sit on a LIVE pin.
+"""#149 pin still colour-cycled caixinha×3. Japan pat 7, not FRAME_LEAD.
 
-Filipe after #148 merge+rebuild (tip a93e361): caixinha (type 4) shots
-still walked red → yellow → green under BULLET VISIBILITY = NORMAL.
-Early ground bolinhas (floor guns before boss 1) stayed white.
+Filipe after #149 merge+rebuild (tip 4cd1f4d): caixinha bolinhas still
+do not match Japan MSX under BULLET VISIBILITY = NORMAL. He is done
+with incremental CRAM / pin / share hacks.
 
-Why #148 was still visible:
-  * white_lock recorded a FRAME_LEAD index without a live sprite.
-  * keep_banked drops AUTO_VRAM; the last disc's SPR_releaseSprite
-    (or a later setVRAMTileIndex) VRAM_free's the span.
-  * Type 21 / fire 7 then occupy those tiles. Ground guns looked
-    white because nothing had stolen the index yet.
-  * Box×3 spawn during collide shared the dangling lock and skipped
-    DMA (white_lock_has_idx treated stolen tiles as proven white).
-  * leave_white only checked the base index, so a 4-tile bar at
-    lock-1 DMA'd across the disc.
+Japan v1 (zanac-re, SHA1 46e9ed7b7f6dfda8eee266476c9ebc4dd9d8fcc2):
+  0x8513 type 38 CALL 8507: LD (IX+04), 0x8F  — no 8659
+  0x84eb type 37 / 42: 0x8F
+  0x8539 type 41: 0x8F
+  0x8672 type 20: 0x8F
+  SAT 0x1C = gfx pat 7 (centred ~4x5 disc in a 16x16)
+  0x8659 type 21 only: LD A,R / AND 0x0F / OR 0x80
 
-Nuclear lock this file FAILS unless:
-  * A hidden pin sprite holds FRAME_LEAD nibble-15 tiles all game.
-  * white_lock_add cannot retarget a pinned index.
-  * leave_white / type 21 skip check the 2x2 span, not just the base.
-  * spr_place / prepare share the pin (same path as ground guns).
-  * box_death_drop is exactly 3× type 38.
-  * Type 21 still 8659s; HIGH discs still 8659; speed 3; no VDP_*Tiles.
+SGDK FRAME_LEAD is an 8x8 UL shard of pat 7. Shared VRAM + CRAM walks
+made boxes cycle while early floor guns sometimes looked white.
+
+This file FAILS unless:
+  * Lead discs encode Japan pat 7 into a 16x16 vehicle (FRAME_CIRCLE)
+  * SAT name stays 0x1C (ebullet_sat_name / ebullet_place_lead)
+  * NORMAL = nibble 15 / 0x8F, no 8659, no type-21 tile share
+  * HIGH / type 21 still 8659 on TYPE21_CRAM_NIB
+  * box_death_drop is exactly 3× type 38 via init_frag
+  * skill never enters; no VDP_allocateTiles
 
 Usage (from zanac-md):
     python tools/test_bolinha_normal_box_nibble15.py
@@ -36,6 +36,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ENT = ROOT / "src" / "entity.c"
 OPTH = ROOT / "inc" / "options.h"
+ASM_CANDIDATES = (
+    Path("/tmp/zanac-re/source/zanac.asm"),
+    Path("/tmp/refs/zanac-re/source/zanac.asm"),
+    Path.home() / "zanac-re" / "source" / "zanac.asm",
+    ROOT.parent / "zanac-re" / "source" / "zanac.asm",
+)
 
 
 def fail(msg: str) -> int:
@@ -59,6 +65,13 @@ def fn_span(src: str, sig: str) -> str | None:
     return None
 
 
+def load_asm() -> str | None:
+    for p in ASM_CANDIDATES:
+        if p.is_file():
+            return p.read_text(encoding="utf-8", errors="replace")
+    return None
+
+
 def main() -> int:
     ent = ENT.read_text(encoding="utf-8")
     opth = OPTH.read_text(encoding="utf-8")
@@ -71,113 +84,78 @@ def main() -> int:
         return fail("TYPE21_CRAM_NIB must be dedicated 5")
     if "type21_cram_not_white" not in ent or "fire7_cram_not_white" not in ent:
         return fail("C89 asserts: type 21 / fire 7 must not be nibble 15")
-    print("  nibbles: white 15; type 21 = 3; fire 7 != 15")
+    print("  nibbles: white 15; type 21 = 5; fire 7 != 15")
 
-    if "WHITE_LOCK_N" not in ent or "s_white_lock" not in ent:
-        return fail("never-evicted white VRAM lock missing")
-    add = fn_span(ent, "static void white_lock_add(u8 frame, u16 idx, u8 ntiles, u8 pinned)") or ""
-    has = fn_span(ent, "static int white_lock_has_idx(u16 idx)") or ""
-    look = fn_span(ent, "static int white_lock_lookup(u8 frame, u16 *out)") or ""
-    ov = fn_span(ent, "static int white_lock_overlaps(u16 idx, u8 ntiles)") or ""
-    pin = fn_span(ent, "static int white_pin_ensure(u8 frame, u16 *out)") or ""
-    if not add or not has or not look:
-        return fail("white_lock add/has/lookup missing")
-    if "pinned" not in add or "if (s_white_lock[i].pinned && !pinned)" not in add:
-        return fail("white_lock_add must not retarget a live pin index")
-    if not ov or "WHITE_SPAN" not in ov:
-        return fail("white_lock_overlaps must cover the 2x2 span (type 21 at lock-1)")
-    if not pin or "SPR_addSpriteEx" not in pin or "shot_vram_keep_banked" not in pin:
-        return fail("live white pin sprite missing (dangling #148 index)")
-    if "FRAME_LEAD" not in pin or "HIDDEN" not in pin:
-        return fail("pin must be a hidden FRAME_LEAD holder")
-    print("  white_lock: live pin sprite; span overlap; pin index sticky")
+    if "k_japan_pat7" not in ent:
+        return fail("Japan gfx pat 7 bytes missing")
+    tiles = fn_span(ent, "static const u8 *lead7_tiles(u8 want)") or ""
+    if "orb_encode_japan_tiles" not in tiles or "k_japan_pat7" not in tiles:
+        return fail("lead7_tiles must encode Japan pat 7 (not FRAME_LEAD PNG)")
+    if "LEAD_WHITE_NIB" not in tiles:
+        return fail("lead7_tiles must bake nibble 15 for NORMAL")
+    pin = fn_span(ent, "static int lead7_pin_ensure(u8 want, u16 *out)") or ""
+    if not pin or "FRAME_CIRCLE" not in pin or "HIDDEN" not in pin:
+        return fail("lead7 pin must be a hidden 16x16 FRAME_CIRCLE vehicle")
+    if "SPR_addSpriteEx" not in pin or "shot_vram_keep_banked" not in pin:
+        return fail("lead7 pin must hold exclusive VRAM (no VDP_*Tiles)")
+    up7 = fn_span(ent, "static int ebullet_upload_lead7(Slot *s, u8 want)") or ""
+    if not up7 or "lead7_pin_ensure" not in up7 or "0x1C" not in up7:
+        return fail("ebullet_upload_lead7 must point at pat 7 and restore SAT 0x1C")
+    if "ebullet_lead_disc" not in up7:
+        return fail("upload_lead7 is only for SAT 0x1C discs (20/37/38/41/42/43)")
+    print("  look: Japan pat 7 on 16x16 vehicle; SAT 0x1C")
 
-    leave = fn_span(ent, "static int shot_vram_leave_white(Sprite *sp, u8 nib)") or ""
-    if "white_lock_overlaps" not in leave:
-        return fail("leave_white must leave the locked span (not just base index)")
-    prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
-    arm = prep.split("ebullet_normal_lock")[1][:900] if "ebullet_normal_lock" in prep else ""
-    if "white_pin_ensure" not in arm:
-        return fail("NORMAL prepare must share the live pin first (not a dangling lock)")
-    if "white_lock_lookup" not in arm:
-        return fail("NORMAL prepare must share the locked white index")
-    if "shot_bank_lookup" not in arm or "shot_bank_painted_at" not in arm:
-        return fail("NORMAL prepare must still share a painted bank as fallback")
-    if "white_lock_has_idx" not in prep:
-        return fail("type 21 / HIGH prepare must refuse a locked white index")
-    rem = fn_span(ent, "static void shot_vram_remember(Slot *s, u8 want, u8 ntiles, u8 painted)") or ""
-    if "white_lock_overlaps" not in rem or "LEAD_WHITE_NIB" not in rem:
-        return fail("remember must not alias a cycling nibble onto locked white")
-    print("  share: lock first; type 21 / fire cannot sit on it")
+    place = fn_span(ent, "static void ebullet_place_lead(Slot *e)") or ""
+    if not place or "FRAME_CIRCLE" not in place or "0x1C" not in place:
+        return fail("ebullet_place_lead must use FRAME_CIRCLE vehicle + SAT 0x1C")
+    if "ebullet_upload_lead7" not in place:
+        return fail("ebullet_place_lead must upload Japan pat 7")
+    print("  place: every lead disc goes through ebullet_place_lead")
 
-    buf = fn_span(ent, "static const u8 *lead_white_buf(const u8 *src, u16 nbytes)") or ""
-    if "orb_paint_body_nibbles" not in buf or "orb_keep_body_nibbles" not in buf:
-        return fail("lead_white_buf must paint_all-15 AND drop non-15 leftover")
-    up = fn_span(ent, "static void spr_upload_color(Slot *s)") or ""
-    if "s_white_only" not in up or "orb_keep_body_nibbles" not in up:
-        return fail("NORMAL upload must keep_body nibble 15 only")
-    if "white_lock_add" not in up:
-        return fail("NORMAL paint_all-15 must lock the VRAM index")
-    if "ebullet_cram_shot" not in up or "white_lock_overlaps" not in up:
-        return fail("type 21 matching skip must bust a stolen pin span")
-    print("  pixels: only nibble 15 (keep_body); index locked; type 21 leaves pin")
-
-    pal = fn_span(ent, "static void pal2_write(u8 nib, u16 color)") or ""
-    if not pal:
-        return fail("pal2_write missing")
-    if "LEAD_WHITE_NIB" not in pal or "k_tms_vdp[LEAD_WHITE_NIB]" not in pal:
-        return fail("pal2_write must force PAL2[15] to TMS white")
-    if "FLYER_GREEN_NIB" not in pal or "k_tms_vdp[FLYER_GREEN_NIB]" not in pal:
-        return fail("pal2_write must force PAL2[3] to TMS light green")
-    # Walkers must not PAL_setColor PAL2+n themselves (15 is locked).
-    outside_pal2 = ent
-    pal_fn = fn_span(ent, "static void pal2_write(u8 nib, u16 color)") or ""
-    if pal_fn:
-        outside_pal2 = ent.replace(pal_fn, "")
-    if re.search(
-        r"PAL_setColor\s*\(\s*\(u16\)\s*\(\s*\(PAL2\s*\*\s*16\)\s*\+\s*"
-        r"(LEAD_WHITE_NIB|15)\b",
-        outside_pal2,
-    ):
-        return fail("direct PAL_setColor PAL2[15] outside pal2_write")
-    if re.search(
-        r"PAL_setColor\s*\(\s*\(u16\)\s*\(\s*\(PAL2\s*\*\s*16\)\s*\+\s*"
-        r"(s->cram_nib|nib|FIRE7_CRAM_NIB|LIGHTBAR_CRAM_NIB)",
-        outside_pal2,
-    ):
-        return fail("xor/fire/type21 must pal2_write, not raw PAL_setColor PAL2+n")
-    for sig in (
-        "static void fire7_bind_cram(Slot *f)",
-        "static void fire7_cycle_cram(Slot *f)",
-        "static int xor_cram_bind(Slot *s, u8 col)",
-        "static void xor_cram_cycle(Slot *s, u8 col)",
+    for sig, tag in (
+        ("static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)", "init_frag"),
+        ("static void spawn_ebullet_dir(s16 x, s16 y, u8 dir)", "spawn_ebullet_dir"),
+        ("static void spawn_lead20(s16 x, s16 y)", "spawn_lead20"),
     ):
         body = fn_span(ent, sig) or ""
-        if "pal2_write" not in body:
-            return fail("%s must pal2_write (cannot walk 15)" % sig.split()[-1])
-    print("  PAL2[15]: pal2_write lock; walkers cannot tint discs")
+        if "ebullet_place_lead" not in body:
+            return fail("%s must ebullet_place_lead (not FRAME_LEAD shard)" % tag)
+        if re.search(r"spr_place\s*\([^)]*FRAME_LEAD", body):
+            return fail("%s must not spr_place FRAME_LEAD" % tag)
+    stream = fn_span(ent, "static int spawn_from_type(u8 t)") or ""
+    if "ebullet_place_lead" not in stream:
+        return fail("stream type 20 must ebullet_place_lead")
+    print("  spawn: init_frag / type37 / type20 all Japan pat 7")
 
-    fire7 = fn_span(ent, "static void fire7_paint_cram_tiles(Slot *f)") or ""
-    if "shot_vram_leave_white" not in fire7:
-        return fail("fire 7 must leave locked white before comet DMA")
-    print("  fire 7: leave_white before PAL2[13] paint")
+    satn = fn_span(ent, "static u8 ebullet_sat_name(const Slot *e)") or ""
+    if "0x1C" not in satn:
+        return fail("ebullet_sat_name must keep SAT 0x1C for lead discs")
+    print("  collision: SAT 0x1C (Japan 4560)")
 
-    initf = fn_span(
-        ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)"
-    ) or ""
-    kind_at = initf.find("e->kind = KIND_EBULLET")
-    det_at = initf.find("spr_detach")
-    lock_at = initf.find("ebullet_normal_lock")
-    if det_at < 0 or lock_at < 0 or det_at < kind_at:
-        return fail("init_frag must spr_detach leftover SAT after KIND_EBULLET under NORMAL")
-    if "ebullet_normal_lock(e)" not in initf or "spr_detach(e)" not in initf:
-        return fail("NORMAL box/gun/boss discs must drop leftover SAT")
-    print("  init_frag: NORMAL detaches crate/type21 leftover SAT")
+    prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
+    if "ebullet_lead_disc" not in prep or "lead7_pin_ensure" not in prep:
+        return fail("prepare must share only the Japan pat 7 pin for lead discs")
+    if "lead7_pin_overlaps" not in prep or "lead7_pin_has_idx" not in prep:
+        return fail("type 21 / HIGH prepare must refuse the pat 7 span")
+    lock = prep.split("ebullet_normal_lock")[1][:200] if "ebullet_normal_lock" in prep else ""
+    if "return 0" not in lock:
+        return fail("type 45 NORMAL must not share type 21's light_bar bank")
+    leave = fn_span(ent, "static int shot_vram_leave_white(Sprite *sp, u8 nib)") or ""
+    if "lead7_pin_overlaps" not in leave:
+        return fail("leave_white must leave the Japan pat 7 span")
+    print("  VRAM: pat 7 exclusive of type 21; type 45 NORMAL paints own white")
 
-    setc = fn_span(ent, "static void spr_set_sat_col(Slot *s, u8 col)") or ""
-    if "ebullet_white_frame" not in setc:
-        return fail("spr_set_sat_col must not upload leftover crate/type21 as (oldframe,15)")
-    print("  spr_set_sat_col: upload only bolinha frames")
+    up = fn_span(ent, "static void spr_upload_color(Slot *s)") or ""
+    if "ebullet_upload_lead7" not in up:
+        return fail("spr_upload_color must take the Japan pat 7 path for lead discs")
+    if "lead_white_buf" in up:
+        return fail("do not remap FRAME_LEAD PNG for bolinhas")
+    print("  upload: lead discs never touch FRAME_LEAD packed nibble 4")
+
+    pal = fn_span(ent, "static void pal2_write(u8 nib, u16 color)") or ""
+    if not pal or "LEAD_WHITE_NIB" not in pal or "k_tms_vdp[LEAD_WHITE_NIB]" not in pal:
+        return fail("pal2_write must force PAL2[15] to TMS white")
+    print("  PAL2[15]: locked TMS white")
 
     drop = fn_span(ent, "static void box_death_drop(s16 sx, s16 sy)") or ""
     if drop.count("spawn_frag(") != 3 or drop.count(", 38)") != 3:
@@ -194,35 +172,55 @@ def main() -> int:
         return fail("ebullet_8659 must refuse NORMAL lock")
     if apply.count("ebullet_8659") < 2:
         return fail("type 21 and HIGH must still 8659")
-    print("  assert: NORMAL cannot rnd-walk; type 21 / HIGH can")
+    print("  colour: NORMAL 0x8F; type 21 / HIGH 8659")
 
+    initf = fn_span(
+        ent, "static void init_frag(Slot *e, s16 x, s16 y, u8 dir, u8 variant)"
+    ) or ""
     arm38 = initf.split("variant == 38")[1][:400] if "variant == 38" in initf else ""
     if "apply_dir_88(e, dir, 3)" not in arm38:
         return fail("type 38 must keep Japan speed 3")
-    skip = re.search(
-        r"if\s*\(\s*s->vram_fr\s*==\s*s->frame\s*&&\s*s->vram_nib\s*==\s*want"
-        r"[\s\S]{0,80}?\)\s*return;",
-        up,
-    )
-    if not skip or "ebullet_normal_lock" in skip.group(0):
-        return fail("matching skip must stay (3+ volley speed)")
-    print("  speed: type 38 = 3; matching skip kept")
+    if "ebullet_normal_lock(e)" not in initf or "spr_detach(e)" not in initf:
+        return fail("NORMAL must drop leftover crate SAT before place")
+    print("  speed: type 38 = 3; leftover SAT detached")
 
     if re.search(r"VDP_allocateTiles\s*\(", ent) or re.search(
         r"VDP_releaseTiles\s*\(", ent
     ):
         return fail("do not reintroduce VDP_allocateTiles/releaseTiles")
-    if "pin sprite" not in opth and "PAL2[15]" not in opth:
-        return fail("options.h must document the live white pin / PAL2[15]")
+    if "pat 7" not in opth and "SAT 0x1C" not in opth:
+        return fail("options.h must document Japan pat 7 / SAT 0x1C")
     boot = fn_span(ent, "void entity_init(void)") or ""
-    if "white_pin_ensure" not in boot or "FRAME_LEAD" not in boot:
-        return fail("entity_init must hold FRAME_LEAD white for the session")
-    place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
-    if "white_pin_ensure" not in place:
-        return fail("spr_place must share the live pin under NORMAL")
-    print("  KEEP: live pin; no VDP_*Tiles; type 21 ungated; no per-tick paint_all")
+    if "lead7_pin_ensure" not in boot or "LEAD_WHITE_NIB" not in boot:
+        return fail("entity_init must hold Japan pat 7 white for the session")
+    place_spr = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
+    if "lead7_pin_ensure" not in place_spr:
+        return fail("spr_place must share the Japan pat 7 pin for lead discs")
+    print("  KEEP: Japan pat 7 pin; no VDP_*Tiles; type 21 ungated")
 
-    print("ok: NORMAL box bolinhas cannot show non-white pixels")
+    if "WHITE_LOCK_N" in ent or "white_pin_ensure" in ent:
+        return fail("remove the #149 FRAME_LEAD pin / white_lock share maze")
+    print("  discarded: FRAME_LEAD white_lock / pin heuristics")
+
+    asm = load_asm()
+    if not asm:
+        print("  (zanac.asm not on this machine; C locks only)")
+    else:
+        for addr, who in (
+            ("0x84eb", "type 37/42"),
+            ("0x8513", "type 38/43/45"),
+            ("0x8539", "type 41"),
+            ("0x8672", "type 20"),
+        ):
+            if not re.search(rf"LD\s+\(IX\+0x04\),\s*0x8f\s*;\s*{addr}", asm, re.I):
+                return fail("zanac.asm %s is not LD (IX+04), 0x8F (%s)" % (addr, who))
+        if not re.search(r"LD\s+A,\s*R\s*;\s*0x8659", asm, re.I):
+            return fail("zanac.asm 8659 is not LD A,R (type 21 always-cycle)")
+        if not re.search(r"JR\s+NZ,\s*0x8659\s*;\s*0x8639", asm, re.I):
+            return fail("zanac.asm 8639 is not JR NZ 8659")
+        print("  zanac.asm: 84eb/8513/8539/8672 +04=0x8F; 8659 type 21 always")
+
+    print("ok: NORMAL box/ground/boss bolinhas are Japan pat 7 white discs")
     return 0
 
 
