@@ -257,11 +257,11 @@ def main() -> int:
     if not prep or "ebullet_normal_lock" not in prep:
         return fail("shot_vram_prepare must refuse type-21 share under NORMAL")
     if "lead7_pin_ensure" not in prep:
-        return fail("NORMAL lead discs must share the Japan pat 7 pin")
+        return fail("NORMAL lead discs must share the FRAME_LEAD pin")
     lock_arm = prep.split("ebullet_normal_lock")[1][:300] if "ebullet_normal_lock" in prep else ""
     if "return 0" not in lock_arm:
         return fail("type 45 NORMAL must return 0 (own white tiles, not type 21)")
-    print("  shot_vram_prepare: Japan pat 7 pin; type 45 NORMAL isolated")
+    print("  shot_vram_prepare: FRAME_LEAD pin; type 45 NORMAL isolated")
 
     place = fn_span(ent, "static void spr_place(Slot *s, u16 frame)") or ""
     if "else\n                spr_upload_color(s)" in place or (

@@ -108,10 +108,10 @@ def main() -> int:
 
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
     if "lead7_pin_ensure" not in prep:
-        return fail("NORMAL 3+ discs must share the Japan pat 7 pin (no per-disc DMA)")
+        return fail("NORMAL 3+ discs must share the FRAME_LEAD pin (no per-disc DMA)")
     if "ebullet_lead_disc" not in prep:
         return fail("prepare must key lead discs separately from type 21")
-    print("  shot_vram_prepare: Japan pat 7 pin share (3+ volley speed)")
+    print("  shot_vram_prepare: FRAME_LEAD pin share (3+ volley speed)")
 
     sync = fn_span(ent, "static void spr_sync_proj(Slot *s)") or ""
     if "shot_vram_own" not in sync or "ebullet_normal_lock" not in sync:

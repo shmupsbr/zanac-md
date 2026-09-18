@@ -190,10 +190,15 @@ def main() -> int:
     if "FRAME_LIGHT_BAR" not in frag:
         return fail("type 21/45 spr_place FRAME_LIGHT_BAR")
     if "ebullet_place_lead" not in frag:
-        return fail("lead discs must ebullet_place_lead (Japan pat 7, not FRAME_LEAD shard)")
+        return fail("lead discs must ebullet_place_lead (FRAME_LEAD bolinha)")
+    place = fn_span(ent, "static void ebullet_place_lead(Slot *e)") or ""
+    if "FRAME_LEAD" not in place:
+        return fail("ebullet_place_lead must spr_place FRAME_LEAD (small bolinha)")
+    if re.search(r"spr_place\s*\([^)]*FRAME_CIRCLE", place):
+        return fail("ebullet_place_lead must not spr_place FRAME_CIRCLE (ship-sized #150 blob)")
     if "cram_nib = 0" not in frag:
         return fail("init_frag must clear leftover cram_nib before spr_place")
-    print("  init_frag: apply_vis; 21/45 FRAME_LIGHT_BAR; leads Japan pat 7")
+    print("  init_frag: apply_vis; 21/45 FRAME_LIGHT_BAR; leads FRAME_LEAD")
 
     apply = fn_span(ent, "static void ebullet_apply_vis(Slot *e)")
     if not apply:

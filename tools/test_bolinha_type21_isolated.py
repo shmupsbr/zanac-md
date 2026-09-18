@@ -139,17 +139,24 @@ def main() -> int:
         return fail("leave_white must leave any FRAME_LEAD bank")
     prep = fn_span(ent, "static int shot_vram_prepare(Slot *s, u8 want, u8 ntiles)") or ""
     if "lead7_pin_overlaps" not in prep and "lead7_pin_has_idx" not in prep:
-        return fail("type 21 / HIGH prepare must refuse the Japan pat 7 span")
-    print("  share: Japan pat 7 never sits in a type 21 bank")
+        return fail("type 21 / HIGH prepare must refuse the FRAME_LEAD span")
+    print("  share: FRAME_LEAD never sits in a type 21 bank")
 
-    # 5. Japan pat 7 encoded once; later discs point at the pin.
-    buf = fn_span(ent, "static const u8 *lead7_tiles(u8 want)") or ""
-    if not buf or "orb_encode_japan_tiles" not in buf or "k_japan_pat7" not in buf:
-        return fail("lead7_tiles must encode Japan pat 7 once into RAM")
+    # 5. FRAME_LEAD painted once; later discs point at the pin.
+    buf = fn_span(ent, "static const u8 *lead_frame_tiles(const u8 *src, u16 nbytes, u8 want)") or ""
+    if not buf or "orb_paint_body_nibbles" not in buf or "orb_keep_body_nibbles" not in buf:
+        return fail("lead_frame_tiles must paint FRAME_LEAD PNG once into RAM")
+    if "orb_encode_japan_tiles" in buf or "k_japan_pat7" in buf:
+        return fail("do not encode Japan pat 7 16x16 for bolinhas")
+    pin = fn_span(ent, "static int lead7_pin_ensure(u8 want, u16 *out)") or ""
+    if "FRAME_LEAD" not in pin:
+        return fail("lead pin must be FRAME_LEAD")
+    if re.search(r"SPR_setAnimAndFrame\s*\([^)]*FRAME_CIRCLE", pin):
+        return fail("lead pin must not set FRAME_CIRCLE (ship-sized #150 blob)")
     up = fn_span(ent, "static void spr_upload_color(Slot *s)") or ""
     if "ebullet_upload_lead7" not in up:
-        return fail("NORMAL lead discs must DMA Japan pat 7, not FRAME_LEAD PNG")
-    print("  speed: Japan pat 7 is one encode + pin share")
+        return fail("NORMAL lead discs must DMA the FRAME_LEAD pin")
+    print("  speed: FRAME_LEAD is one paint + pin share")
 
     # 6. Assertion: NORMAL cannot rnd-walk bolinha; type 21 can.
     walk = fn_span(ent, "static void ebullet_8659(Slot *e)") or ""
